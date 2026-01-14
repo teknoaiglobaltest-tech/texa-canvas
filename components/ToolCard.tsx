@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { AITool } from '../types';
 import { auth } from '../services/firebase';
+import { useNavigate } from 'react-router-dom';
+import { isUrlIframeAllowed } from '../utils/iframePolicy';
 import {
   subscribeToSettings,
   SubscriptionSettings,
@@ -9,7 +11,6 @@ import {
   formatIDR,
   DEFAULT_SETTINGS
 } from '../services/subscriptionService';
-import '../types/texa-extension';
 
 interface ToolCardProps {
   tool: AITool;
@@ -67,6 +68,7 @@ const parseYouTubeUrl = (url: string): string | null => {
 };
 
 const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
+  const navigate = useNavigate();
   const [injecting, setInjecting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [showSubscribePopup, setShowSubscribePopup] = useState(false);
@@ -91,7 +93,7 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
   const tryOpenViaExtension = async (): Promise<boolean> => {
     if (window.TEXAExtension && window.TEXAExtension.ready) {
       try {
-        window.TEXAExtension.openTool(tool.id, tool.targetUrl);
+        window.TEXAExtension.openTool(tool.id, tool.targetUrl, tool.apiUrl);
         return true;
       } catch (error) {
         console.error('Extension open tool failed:', error);
@@ -136,6 +138,13 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
   const handleOpenTool = () => {
     if (!hasAccess) {
       setShowSubscribePopup(true);
+      return;
+    }
+
+    const canIframe = tool.openMode === 'iframe' && isUrlIframeAllowed(tool.targetUrl);
+
+    if (canIframe) {
+      navigate(`/tool/${tool.id}`);
       return;
     }
 

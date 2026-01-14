@@ -46,7 +46,8 @@ class TEXAToolsManager {
     }
 
     try {
-      const response = await fetch(`${this.origin}/api/admin/users`, {
+      // Use catalog endpoint to check connection as it is accessible to all members
+      const response = await fetch(`${this.origin}/api/catalog`, {
         headers: {
           'Authorization': `Bearer ${this.idToken}`,
           'Content-Type': 'application/json'

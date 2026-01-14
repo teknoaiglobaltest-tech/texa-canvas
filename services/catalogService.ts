@@ -7,12 +7,11 @@ import {
     addDoc,
     updateDoc,
     deleteDoc,
-    onSnapshot,
     query,
     orderBy,
     serverTimestamp,
     Timestamp
-} from 'firebase/firestore';
+} from 'firebase/firestore/lite';
 import { db, COLLECTIONS } from './firebase';
 import { AITool } from '../types';
 
@@ -41,18 +40,31 @@ export const DEFAULT_CATEGORIES = [
 export const subscribeToCatalog = (callback: (items: CatalogItem[]) => void) => {
     const q = query(collection(db, CATALOG_COLLECTION), orderBy('order', 'asc'));
 
-    return onSnapshot(q, (snapshot) => {
-        const items: CatalogItem[] = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate?.()?.toISOString?.() || doc.data().createdAt,
-            updatedAt: doc.data().updatedAt?.toDate?.()?.toISOString?.() || doc.data().updatedAt
-        } as CatalogItem));
-        callback(items);
-    }, (error) => {
-        console.error('Error subscribing to catalog:', error);
-        callback([]);
-    });
+    let stopped = false;
+
+    const fetchOnce = async () => {
+        if (stopped) return;
+        try {
+            const snapshot = await getDocs(q);
+            const items: CatalogItem[] = snapshot.docs.map(docSnap => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+                createdAt: (docSnap.data() as any)?.createdAt?.toDate?.()?.toISOString?.() || (docSnap.data() as any)?.createdAt,
+                updatedAt: (docSnap.data() as any)?.updatedAt?.toDate?.()?.toISOString?.() || (docSnap.data() as any)?.updatedAt
+            } as CatalogItem));
+            callback(items);
+        } catch (error) {
+            console.error('Error subscribing to catalog:', error);
+            callback([]);
+        }
+    };
+
+    void fetchOnce();
+    const intervalId = setInterval(fetchOnce, 7000);
+    return () => {
+        stopped = true;
+        clearInterval(intervalId);
+    };
 };
 
 // Get all catalog items

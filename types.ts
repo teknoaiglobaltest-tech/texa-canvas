@@ -10,6 +10,7 @@ export interface AITool {
   category: string;
   imageUrl: string;
   targetUrl: string;
+  openMode?: 'new_tab' | 'iframe';
   status: 'active' | 'inactive';
   priceMonthly: number;
   // New fields for extension integration

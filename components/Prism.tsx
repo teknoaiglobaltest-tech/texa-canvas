@@ -117,12 +117,25 @@ const Prism: React.FC<PrismProps> = ({
     const scaleLoc = gl.getUniformLocation(program, 'scale');
 
     let animationFrameId: number;
+    let lastWidth = 0;
+    let lastHeight = 0;
+    let lastDpr = 0;
+
     const render = (now: number) => {
       const t = now * 0.001 * timeScale;
       
-      canvas.width = canvas.clientWidth;
-      canvas.height = canvas.clientHeight;
-      gl.viewport(0, 0, canvas.width, canvas.height);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const width = Math.floor(canvas.clientWidth * dpr);
+      const height = Math.floor(canvas.clientHeight * dpr);
+
+      if (width > 0 && height > 0 && (width !== lastWidth || height !== lastHeight || dpr !== lastDpr)) {
+        canvas.width = width;
+        canvas.height = height;
+        gl.viewport(0, 0, width, height);
+        lastWidth = width;
+        lastHeight = height;
+        lastDpr = dpr;
+      }
 
       gl.useProgram(program);
       gl.uniform2f(resLoc, canvas.width, canvas.height);

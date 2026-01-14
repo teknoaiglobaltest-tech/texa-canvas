@@ -11,6 +11,7 @@ import {
     DEFAULT_CATEGORIES,
     CatalogItem
 } from '../services/catalogService';
+import { getIframeAllowedHostPatterns, isUrlIframeAllowed } from '../utils/iframePolicy';
 
 interface CatalogManagerProps {
     showToast: (message: string, type: 'success' | 'error') => void;
@@ -33,6 +34,7 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
         category: DEFAULT_CATEGORIES[0],
         imageUrl: '',
         targetUrl: '',
+        openMode: 'new_tab' as 'new_tab' | 'iframe',
         status: 'active' as 'active' | 'inactive',
         priceMonthly: 0,
         // New fields for extension integration
@@ -70,6 +72,7 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
             category: DEFAULT_CATEGORIES[0],
             imageUrl: '',
             targetUrl: '',
+            openMode: 'new_tab',
             status: 'active',
             priceMonthly: 0,
             embedVideoUrl: '',
@@ -79,6 +82,8 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
         setSelectedItem(null);
         setShowAdvanced(false);
     };
+
+    const allowedIframeHosts = getIframeAllowedHostPatterns();
 
     // Open modal
     const openModal = (type: 'add' | 'edit' | 'delete', item?: CatalogItem) => {
@@ -92,6 +97,7 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
                     category: item.category,
                     imageUrl: item.imageUrl,
                     targetUrl: item.targetUrl,
+                    openMode: item.openMode || 'new_tab',
                     status: item.status,
                     priceMonthly: item.priceMonthly,
                     embedVideoUrl: item.embedVideoUrl || '',
@@ -115,6 +121,11 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
         setActionLoading(true);
 
         try {
+            if (formData.openMode === 'iframe' && !isUrlIframeAllowed(formData.targetUrl)) {
+                showToast(`Mode iframe hanya untuk domain yang diizinkan: ${allowedIframeHosts.join(', ')}`, 'error');
+                return;
+            }
+
             if (modalType === 'add') {
                 const id = await addCatalogItem(formData);
                 if (id) {
@@ -467,10 +478,49 @@ const CatalogManager: React.FC<CatalogManagerProps> = ({ showToast }) => {
                                             type="url"
                                             required
                                             value={formData.targetUrl}
-                                            onChange={(e) => setFormData({ ...formData, targetUrl: e.target.value })}
+                                            onChange={(e) => {
+                                                const next = e.target.value;
+                                                const nextEligible = isUrlIframeAllowed(next);
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    targetUrl: next,
+                                                    openMode: prev.openMode === 'iframe' && !nextEligible ? 'new_tab' : prev.openMode
+                                                }));
+                                            }}
                                             placeholder="https://tool-website.com"
                                             className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white focus:outline-none focus:border-indigo-500"
                                         />
+                                        <div className="mt-3">
+                                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                                                Mode Buka
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormData({ ...formData, openMode: 'new_tab' })}
+                                                    className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${formData.openMode === 'new_tab'
+                                                        ? 'bg-indigo-600 text-white'
+                                                        : 'glass border border-white/10 text-slate-400 hover:text-white'
+                                                        }`}
+                                                >
+                                                    Tab Baru
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={!isUrlIframeAllowed(formData.targetUrl)}
+                                                    onClick={() => setFormData({ ...formData, openMode: 'iframe' })}
+                                                    className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${formData.openMode === 'iframe'
+                                                        ? 'bg-emerald-600 text-white'
+                                                        : 'glass border border-white/10 text-slate-400 hover:text-white'
+                                                        } ${!isUrlIframeAllowed(formData.targetUrl) ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                                >
+                                                    Iframe (Host)
+                                                </button>
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 mt-2">
+                                                Domain iframe diizinkan: {allowedIframeHosts.join(', ')}
+                                            </p>
+                                        </div>
                                     </div>
 
                                     {/* Price */}

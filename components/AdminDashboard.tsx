@@ -19,6 +19,7 @@ import {
   formatDate,
   getDaysRemaining,
   getSubscriptionStatus,
+  testDatabasePermissions,
   AdminStats
 } from '../services/adminService';
 import CatalogManager from './CatalogManager';
@@ -62,6 +63,7 @@ const AdminDashboard: React.FC = () => {
   const [manualPasswordConfirm, setManualPasswordConfirm] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [dbStatus, setDbStatus] = useState<{ firestore: string; rtdb: string } | null>(null);
 
   // Subscribe to users on mount
   useEffect(() => {
@@ -105,28 +107,73 @@ const AdminDashboard: React.FC = () => {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedUser(null);
+    setNewPassword('');
+    setNewPasswordConfirm('');
+    setSubscriptionDays(30);
+    setManualEmail('');
+    setManualName('');
+    setManualRole('MEMBER');
+    setManualDays(30);
+    setManualIsActive(true);
+    setManualPassword('');
+    setManualPasswordConfirm('');
+  };
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    });
+    try {
+      return (await Promise.race([promise, timeoutPromise])) as T;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
   // Handle actions
   const handleToggleStatus = async (user: TexaUser) => {
     setActionLoading(true);
-    const success = await toggleUserStatus(user.id, !user.isActive);
-    if (success) {
-      showToast(`User ${user.isActive ? 'dinonaktifkan' : 'diaktifkan'}`, 'success');
-    } else {
-      showToast('Gagal mengubah status user', 'error');
+    try {
+      const success = await withTimeout(
+        toggleUserStatus(user.id, !user.isActive),
+        15000,
+        'Timeout: proses ubah status terlalu lama'
+      );
+      if (success) {
+        showToast(`User ${user.isActive ? 'dinonaktifkan' : 'diaktifkan'}`, 'success');
+      } else {
+        showToast('Gagal mengubah status user', 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal mengubah status user', 'error');
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const handleChangeRole = async (user: TexaUser) => {
     setActionLoading(true);
-    const newRole = user.role === 'ADMIN' ? 'MEMBER' : 'ADMIN';
-    const success = await changeUserRole(user.id, newRole);
-    if (success) {
-      showToast(`Role diubah ke ${newRole}`, 'success');
-    } else {
-      showToast('Gagal mengubah role', 'error');
+    try {
+      const newRole = user.role === 'ADMIN' ? 'MEMBER' : 'ADMIN';
+      const success = await withTimeout(
+        changeUserRole(user.id, newRole),
+        15000,
+        'Timeout: proses ubah role terlalu lama'
+      );
+      if (success) {
+        showToast(`Role diubah ke ${newRole}`, 'success');
+      } else {
+        showToast('Gagal mengubah role', 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal mengubah role', 'error');
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const openPasswordModal = (user: TexaUser) => {
@@ -140,39 +187,69 @@ const AdminDashboard: React.FC = () => {
   const handleSetSubscription = async () => {
     if (!selectedUser) return;
     setActionLoading(true);
-    const success = await setUserSubscription(selectedUser.id, subscriptionDays);
-    if (success) {
-      showToast(`Subscription aktif untuk ${subscriptionDays} hari`, 'success');
-      setShowModal(false);
-    } else {
-      showToast('Gagal mengatur subscription', 'error');
+    try {
+      const success = await withTimeout(
+        setUserSubscription(selectedUser.id, subscriptionDays, 'Premium', 0, selectedUser.email),
+        20000,
+        'Timeout: proses set subscription terlalu lama'
+      );
+      if (success) {
+        showToast(`Subscription aktif untuk ${subscriptionDays} hari`, 'success');
+        closeModal();
+      } else {
+        showToast('Gagal mengatur subscription', 'error');
+        closeModal();
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal mengatur subscription', 'error');
+      closeModal();
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const handleRemoveSubscription = async (user: TexaUser) => {
     setActionLoading(true);
-    const success = await removeUserSubscription(user.id);
-    if (success) {
-      showToast('Subscription dihapus', 'success');
-    } else {
-      showToast('Gagal menghapus subscription', 'error');
+    try {
+      const success = await withTimeout(
+        removeUserSubscription(user.id),
+        20000,
+        'Timeout: proses hapus subscription terlalu lama'
+      );
+      if (success) {
+        showToast('Subscription dihapus', 'success');
+      } else {
+        showToast('Gagal menghapus subscription', 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal menghapus subscription', 'error');
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
     setActionLoading(true);
-    const success = await deleteUser(selectedUser.id);
-    if (success) {
-      showToast('User dihapus', 'success');
-      setShowModal(false);
-      setSelectedUser(null);
-    } else {
-      showToast('Gagal menghapus user', 'error');
+    try {
+      const success = await withTimeout(
+        deleteUser(selectedUser.id),
+        20000,
+        'Timeout: proses hapus user terlalu lama'
+      );
+      if (success) {
+        showToast('User dihapus', 'success');
+        closeModal();
+      } else {
+        showToast('Gagal menghapus user', 'error');
+        closeModal();
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal menghapus user', 'error');
+      closeModal();
+    } finally {
+      setActionLoading(false);
     }
-    setActionLoading(false);
   };
 
   const openModal = (user: TexaUser, type: 'subscription' | 'edit' | 'delete') => {
@@ -241,7 +318,7 @@ const AdminDashboard: React.FC = () => {
           subscriptionDays: manualDays
         });
         showToast('Member login dibuat/diupdate', 'success');
-        setShowModal(false);
+        closeModal();
         return;
       }
 
@@ -255,12 +332,14 @@ const AdminDashboard: React.FC = () => {
 
       if (result.success) {
         showToast(result.action === 'updated' ? 'Member diperbarui' : 'Member manual ditambahkan', 'success');
-        setShowModal(false);
+        closeModal();
       } else {
         showToast('Gagal menambah member manual', 'error');
+        closeModal();
       }
     } catch (err: any) {
       showToast(err.message || 'Gagal menyimpan member', 'error');
+      closeModal();
     } finally {
       setActionLoading(false);
     }
@@ -274,11 +353,37 @@ const AdminDashboard: React.FC = () => {
     }
     setActionLoading(true);
     try {
-      await setMemberPassword({ uid: selectedUser.id, password: newPassword });
+      await withTimeout(
+        setMemberPassword({ uid: selectedUser.id, password: newPassword }),
+        15000,
+        'Timeout: proses ubah password terlalu lama'
+      );
       showToast('Password berhasil diubah', 'success');
-      setShowModal(false);
+      closeModal();
     } catch (err: any) {
       showToast(err.message || 'Gagal mengubah password', 'error');
+      closeModal();
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTestDatabase = async () => {
+    setActionLoading(true);
+    try {
+      const result = await withTimeout(
+        testDatabasePermissions(),
+        15000,
+        'Timeout: test koneksi database terlalu lama'
+      );
+      setDbStatus(result);
+      if (result.firestore === 'OK' && result.rtdb === 'OK') {
+        showToast('Koneksi Database Normal', 'success');
+      } else {
+        showToast('Terjadi Masalah Koneksi Database', 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal test koneksi database', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -367,6 +472,18 @@ const AdminDashboard: React.FC = () => {
             <span className="text-3xl">👑</span> Admin Dashboard
           </h1>
           <p className="text-slate-400 mt-1">Kelola seluruh member, subscription, dan katalog TEXA-TOOLS</p>
+          <div className="flex gap-2 mt-2">
+            <button onClick={handleTestDatabase} disabled={actionLoading} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg text-slate-300">
+                🛠️ Test Koneksi DB
+            </button>
+            {dbStatus && (
+                <span className="text-xs flex gap-2">
+                    <span className={dbStatus.firestore === 'OK' ? 'text-emerald-400' : 'text-red-400'}>Firestore: {dbStatus.firestore}</span>
+                    <span className="text-slate-600">|</span>
+                    <span className={dbStatus.rtdb === 'OK' ? 'text-emerald-400' : 'text-red-400'}>RTDB: {dbStatus.rtdb}</span>
+                </span>
+            )}
+          </div>
         </div>
 
         {/* Tab Navigation */}

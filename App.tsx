@@ -8,6 +8,7 @@ import UserProfile from './components/UserProfile';
 import Login from './components/Login';
 import Hero from './components/Hero';
 import SplashCursor from './components/SplashCursor';
+import ToolIframePage from './components/ToolIframePage';
 import { onAuthChange, logOut, TexaUser } from './services/firebase';
 import toketHtml from './tambahan/toket.txt?raw';
 
@@ -23,7 +24,8 @@ const AppContent: React.FC<{
   const isAdminPage = location.pathname === '/admin';
   const isLoginPage = location.pathname === '/login';
   const isToketPage = location.pathname === '/toket';
-  const hideHeaderFooter = isAdminPage || isLoginPage || isToketPage;
+  const isToolIframePage = location.pathname.startsWith('/tool/');
+  const hideHeaderFooter = isAdminPage || isLoginPage || isToketPage || isToolIframePage;
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -50,7 +52,24 @@ const AppContent: React.FC<{
           } />
 
           <Route path="/admin" element={
-            user?.role === 'ADMIN' ? <AdminDashboard /> : <Navigate to="/" />
+            user?.role === 'ADMIN' ? (
+              <AdminDashboard />
+            ) : (
+              user ? (
+                <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+                  <div className="text-6xl mb-4">🚫</div>
+                  <h1 className="text-2xl font-bold text-white mb-2">Akses Ditolak</h1>
+                  <p className="text-slate-400 mb-6">
+                    Anda login sebagai <strong>{user.email}</strong>, namun akun ini tidak memiliki akses Admin.
+                  </p>
+                  <a href="/" className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all">
+                    Kembali ke Marketplace
+                  </a>
+                </div>
+              ) : (
+                <Navigate to="/" />
+              )
+            )
           } />
 
           <Route path="/toket" element={
@@ -58,6 +77,8 @@ const AppContent: React.FC<{
               <iframe title="Toket" srcDoc={toketHtml} className="w-full h-[92vh] rounded-2xl border border-white/10 bg-white" />
             </div>
           } />
+
+          <Route path="/tool/:toolId" element={<ToolIframePage user={user} />} />
         </Routes>
       </main>
 
@@ -88,9 +109,33 @@ const App: React.FC = () => {
 
   // Listen to Firebase Auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthChange((texaUser) => {
+    const unsubscribe = onAuthChange(async (texaUser) => {
       setUser(texaUser);
       setLoading(false);
+
+      if (texaUser) {
+        // Sync with extension
+        const { auth } = await import('./services/firebase');
+        const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+        
+        // Save to localStorage for extension to read directly
+        if (idToken) {
+          window.localStorage.setItem('texa_id_token', idToken);
+          window.localStorage.setItem('texa_user_email', texaUser.email || '');
+          window.localStorage.setItem('texa_user_role', texaUser.role || '');
+        }
+
+        window.postMessage({
+          source: 'TEXA_DASHBOARD',
+          type: 'TEXA_LOGIN_SYNC',
+          origin: window.location.origin,
+          idToken: idToken,
+          user: {
+            email: texaUser.email,
+            role: texaUser.role
+          }
+        }, window.location.origin);
+      }
     });
 
     // Cleanup subscription

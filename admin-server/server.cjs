@@ -249,9 +249,22 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    if (req.method === 'POST' && url.pathname === '/admin/create-user') return await handleCreateUser(req, res);
-    if (req.method === 'POST' && url.pathname === '/admin/set-password') return await handleSetPassword(req, res);
-  } catch {
+    if (req.method === 'POST' && (url.pathname === '/admin/create-user' || url.pathname === '/api/admin/create-user')) {
+      return await handleCreateUser(req, res);
+    }
+    if (req.method === 'POST' && (url.pathname === '/admin/set-password' || url.pathname === '/api/admin/set-password')) {
+      return await handleSetPassword(req, res);
+    }
+    
+    // Serve API endpoints for local development
+    if (url.pathname === '/api/catalog') {
+      return await require('../api/catalog/index.cjs')(req, res);
+    }
+    if (url.pathname === '/api/tools/get-injection-data') {
+      return await require('../api/tools/get-injection-data.cjs')(req, res);
+    }
+  } catch (error) {
+    console.error('Server error:', error);
     return json(res, 500, { success: false, message: 'Server error' });
   }
 

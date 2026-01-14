@@ -1,126 +1,38 @@
-const STORAGE_KEYS = {
-  TEXA_ORIGIN: 'texa_origin',
-  TEXA_TOKEN: 'texa_token',
-  TEXA_USER: 'texa_user'
-};
 
-class TEXAContentScript {
-  constructor() {
-    this.init();
-  }
+// Content script to bridge communication between web app and extension
 
-  init() {
-    this.setupMessageListener();
-    this.detectTEXADashboard();
-  }
+// 1. Listen for messages from the web page (Dashboard)
+window.addEventListener('message', async (event) => {
+  // Security check: only accept messages from the same window
+  if (event.source !== window) return;
 
-  setupMessageListener() {
-    window.addEventListener('message', (event) => {
-      if (event.source !== window) return;
-      
-      const message = event.data;
-      if (!message || typeof message !== 'object') return;
-      if (message.source !== 'TEXA_DASHBOARD') return;
-
-      this.handleDashboardMessage(message);
-    });
-  }
-
-  async handleDashboardMessage(message) {
-    if (message.type === 'TEXA_OPEN_TOOL') {
-      try {
-        const response = await chrome.runtime.sendMessage({
-          type: 'TEXA_OPEN_TOOL',
-          origin: message.origin,
-          toolId: message.toolId,
-          idToken: message.idToken,
-          targetUrl: message.targetUrl
-        });
-
-        window.postMessage({
-          source: 'TEXA_EXTENSION',
-          type: 'TEXA_TOOL_RESPONSE',
-          success: response && response.ok,
-          error: response && response.error
-        }, '*');
-
-      } catch (error) {
-        console.error('Error handling open tool:', error);
-        window.postMessage({
-          source: 'TEXA_EXTENSION',
-          type: 'TEXA_TOOL_RESPONSE',
-          success: false,
-          error: error.message
-        }, '*');
-      }
-    }
-  }
-
-  detectTEXADashboard() {
-    const currentUrl = window.location.href;
-    const isTEXADashboard = currentUrl.includes('localhost') || 
-                          currentUrl.includes('vercel.app') ||
-                          currentUrl.includes('texa');
-
-    if (isTEXADashboard) {
-      this.injectHelperScript();
-    }
-  }
-
-  injectHelperScript() {
-    const script = document.createElement('script');
-    script.textContent = `
-      (function() {
-        window.TEXAExtension = {
-          ready: true,
-          version: '1.0.0',
-          
-          openTool: function(toolId, targetUrl) {
-            const origin = window.location.origin;
-            const idToken = window.localStorage.getItem('firebaseIdToken');
-            
-            window.postMessage({
-              source: 'TEXA_DASHBOARD',
-              type: 'TEXA_OPEN_TOOL',
-              origin: origin,
-              toolId: toolId,
-              idToken: idToken,
-              targetUrl: targetUrl
-            }, '*');
-          },
-          
-          getStatus: function() {
-            return {
-              ready: true,
-              version: '1.0.0',
-              connected: true
-            };
-          }
-        };
-
-        window.dispatchEvent(new CustomEvent('TEXA_EXTENSION_READY'));
-      })();
-    `;
+  if (event.data.type && event.data.type === 'TEXA_OPEN_TOOL') {
+    console.log('ContentScript received OPEN_TOOL:', event.data);
     
-    script.onload = () => script.remove();
-    (document.head || document.documentElement).appendChild(script);
-  }
-
-  async saveAuthData(origin, idToken, userData) {
+    // Forward to background script
     try {
-      await chrome.storage.local.set({
-        [STORAGE_KEYS.TEXA_ORIGIN]: origin,
-        [STORAGE_KEYS.TEXA_TOKEN]: idToken,
-        [STORAGE_KEYS.TEXA_USER]: userData
-      });
-    } catch (error) {
-      console.error('Error saving auth data:', error);
+      const response = await chrome.runtime.sendMessage(event.data);
+      console.log('Background response:', response);
+    } catch (err) {
+      console.error('Error sending message to background:', err);
     }
   }
+});
+
+// 2. Inject helper script to expose window.TEXAExtension API
+function injectHelperScript() {
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('injectedScript.js');
+    script.onload = function() {
+      this.remove();
+      // Dispatch ready event after injection
+      window.dispatchEvent(new CustomEvent('TEXA_EXTENSION_READY'));
+    };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (e) {
+    console.error('TEXA Extension: Failed to inject helper script', e);
+  }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => new TEXAContentScript());
-} else {
-  new TEXAContentScript();
-}
+injectHelperScript();

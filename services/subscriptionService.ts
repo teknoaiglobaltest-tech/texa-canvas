@@ -2,9 +2,8 @@
 import {
     doc,
     getDoc,
-    setDoc,
-    onSnapshot
-} from 'firebase/firestore';
+    setDoc
+} from 'firebase/firestore/lite';
 import { db, COLLECTIONS } from './firebase';
 
 // Collection and document name - use from centralized config
@@ -120,16 +119,29 @@ export const getSubscriptionSettings = async (): Promise<SubscriptionSettings> =
 export const subscribeToSettings = (callback: (settings: SubscriptionSettings) => void) => {
     const docRef = doc(db, SETTINGS_COLLECTION, SUBSCRIPTION_DOC);
 
-    return onSnapshot(docRef, (docSnap) => {
-        if (docSnap.exists()) {
-            callback({ ...DEFAULT_SETTINGS, ...docSnap.data() } as SubscriptionSettings);
-        } else {
+    let stopped = false;
+
+    const fetchOnce = async () => {
+        if (stopped) return;
+        try {
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                callback({ ...DEFAULT_SETTINGS, ...docSnap.data() } as SubscriptionSettings);
+            } else {
+                callback(DEFAULT_SETTINGS);
+            }
+        } catch (error) {
+            console.error('Error subscribing to settings:', error);
             callback(DEFAULT_SETTINGS);
         }
-    }, (error) => {
-        console.error('Error subscribing to settings:', error);
-        callback(DEFAULT_SETTINGS);
-    });
+    };
+
+    void fetchOnce();
+    const intervalId = setInterval(fetchOnce, 10000);
+    return () => {
+        stopped = true;
+        clearInterval(intervalId);
+    };
 };
 
 // Save subscription settings
@@ -244,16 +256,29 @@ export const getRevenueShareSettings = async (): Promise<RevenueShareSettings> =
 export const subscribeToRevenueShareSettings = (callback: (settings: RevenueShareSettings) => void) => {
     const docRef = doc(db, SETTINGS_COLLECTION, REVENUE_SHARE_DOC);
 
-    return onSnapshot(docRef, (docSnap) => {
-        if (docSnap.exists()) {
-            callback({ ...DEFAULT_REVENUE_SHARE, ...docSnap.data() } as RevenueShareSettings);
-        } else {
+    let stopped = false;
+
+    const fetchOnce = async () => {
+        if (stopped) return;
+        try {
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                callback({ ...DEFAULT_REVENUE_SHARE, ...docSnap.data() } as RevenueShareSettings);
+            } else {
+                callback(DEFAULT_REVENUE_SHARE);
+            }
+        } catch (error) {
+            console.error('Error subscribing to revenue share settings:', error);
             callback(DEFAULT_REVENUE_SHARE);
         }
-    }, (error) => {
-        console.error('Error subscribing to revenue share settings:', error);
-        callback(DEFAULT_REVENUE_SHARE);
-    });
+    };
+
+    void fetchOnce();
+    const intervalId = setInterval(fetchOnce, 10000);
+    return () => {
+        stopped = true;
+        clearInterval(intervalId);
+    };
 };
 
 export const saveRevenueShareSettings = async (

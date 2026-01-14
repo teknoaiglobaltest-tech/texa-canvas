@@ -3,17 +3,15 @@ import {
     collection,
     getDocs,
     doc,
-    updateDoc,
     deleteDoc,
     query,
     orderBy,
     where,
-    onSnapshot,
-    Timestamp,
     addDoc,
-    limit
-} from "firebase/firestore";
-import { ref, set, remove, onValue, get } from "firebase/database";
+    limit,
+    setDoc
+} from "firebase/firestore/lite";
+import { ref, set, remove, onValue, get, update } from "firebase/database";
 import { auth, db, rtdb, TexaUser, COLLECTIONS, RTDB_PATHS } from "./firebase";
 
 // Collection names - use from centralized config
@@ -52,21 +50,45 @@ export interface AdminStats {
     adminCount: number;
 }
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    });
+    try {
+        return (await Promise.race([promise, timeoutPromise])) as T;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
+};
+
 // Get All Users (Realtime)
 export const subscribeToUsers = (callback: (users: TexaUser[]) => void) => {
+    let stopped = false;
     const usersRef = collection(db, USERS_COLLECTION);
     const q = query(usersRef, orderBy('createdAt', 'desc'));
 
-    return onSnapshot(q, (snapshot) => {
-        const users: TexaUser[] = [];
-        snapshot.forEach((doc) => {
-            users.push({ ...doc.data(), id: doc.id } as TexaUser);
-        });
-        callback(users);
-    }, (error) => {
-        console.error('Error fetching users:', error);
-        callback([]);
-    });
+    const fetchOnce = async () => {
+        if (stopped) return;
+        try {
+            const snapshot = await withTimeout(getDocs(q), 10000, 'Timeout: ambil data user terlalu lama');
+            const users: TexaUser[] = [];
+            snapshot.forEach((docSnap) => {
+                users.push({ ...docSnap.data(), id: docSnap.id } as TexaUser);
+            });
+            callback(users);
+        } catch (error) {
+            console.error('Error fetching users:', error);
+            callback([]);
+        }
+    };
+
+    void fetchOnce();
+    const intervalId = setInterval(fetchOnce, 5000);
+    return () => {
+        stopped = true;
+        clearInterval(intervalId);
+    };
 };
 
 // Get All Users (One-time)
@@ -74,7 +96,7 @@ export const getAllUsers = async (): Promise<TexaUser[]> => {
     try {
         const usersRef = collection(db, USERS_COLLECTION);
         const q = query(usersRef, orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
+        const snapshot = await withTimeout(getDocs(q), 10000, 'Timeout: ambil data user terlalu lama');
 
         const users: TexaUser[] = [];
         snapshot.forEach((doc) => {
@@ -124,6 +146,8 @@ const callAdminApi = async <T>(path: string, body: any): Promise<T> => {
     if (!token) throw new Error('Anda harus login sebagai admin');
 
     let res: Response;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
         res = await fetch(`${ADMIN_API_BASE}${path}`, {
             method: 'POST',
@@ -131,10 +155,16 @@ const callAdminApi = async <T>(path: string, body: any): Promise<T> => {
                 'content-type': 'application/json',
                 'authorization': `Bearer ${token}`
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: controller.signal
         });
-    } catch {
+    } catch (err: any) {
+        if (err?.name === 'AbortError') {
+            throw new Error('Timeout: server admin tidak merespons');
+        }
         throw new Error('Server admin belum jalan');
+    } finally {
+        clearTimeout(timeoutId);
     }
 
     const data = await res.json().catch(() => ({}));
@@ -165,45 +195,104 @@ export const setMemberPassword = async (input: {
 export const updateUser = async (userId: string, data: Partial<TexaUser>): Promise<boolean> => {
     try {
         const userRef = doc(db, USERS_COLLECTION, userId);
-        await updateDoc(userRef, {
+        
+        // Use setDoc with merge instead of updateDoc to handle cases where doc might be missing
+        await withTimeout(setDoc(userRef, {
             ...data,
             updatedAt: new Date().toISOString()
-        });
+        }, { merge: true }), 10000, 'Timeout: update user terlalu lama');
 
         // Also update RTDB
-        if (data.role || data.isActive !== undefined) {
-            try {
-                await set(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`), {
-                    role: data.role,
-                    isActive: data.isActive,
-                    updatedAt: new Date().toISOString()
-                });
-            } catch {
-            }
+        if (data.role || data.isActive !== undefined || data.subscriptionEnd !== undefined) {
+            const updates: any = { updatedAt: new Date().toISOString() };
+            if (data.role) updates.role = data.role;
+            if (data.isActive !== undefined) updates.isActive = data.isActive;
+            if (data.subscriptionEnd !== undefined) updates.subscriptionEnd = data.subscriptionEnd;
+
+            void withTimeout(
+                update(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`), updates),
+                8000,
+                'Timeout: update RTDB terlalu lama'
+            ).catch(async () => {
+                try {
+                    const snapshot = await withTimeout(
+                        get(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`)),
+                        8000,
+                        'Timeout: ambil RTDB terlalu lama'
+                    );
+                    const existing = snapshot.exists() ? snapshot.val() : {};
+                    await withTimeout(set(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`), {
+                        ...existing,
+                        ...data,
+                        updatedAt: new Date().toISOString()
+                    }), 8000, 'Timeout: set RTDB terlalu lama');
+                } catch {
+                }
+            });
         }
 
         return true;
     } catch (error) {
-        console.error('Error updating user:', error);
         return false;
     }
+};
+
+// Test Database Permissions
+export const testDatabasePermissions = async (): Promise<{ firestore: string; rtdb: string }> => {
+    const results = { firestore: 'Testing...', rtdb: 'Testing...' };
+    
+    // Test Firestore
+    try {
+        if (!auth.currentUser) {
+            results.firestore = 'FAILED (not-authenticated): Anda belum login';
+        } else {
+        const testDocRef = doc(db, COLLECTIONS.SETTINGS, 'permission_test');
+        await withTimeout(setDoc(testDocRef, { 
+            test: true, 
+            updatedAt: new Date().toISOString(),
+            user: auth.currentUser?.email 
+        }), 10000, 'Timeout: test Firestore terlalu lama');
+        results.firestore = 'OK';
+        }
+    } catch (e: any) {
+        const code = e?.code ? String(e.code) : '';
+        const message = e?.message ? String(e.message) : 'Unknown error';
+        results.firestore = code ? `FAILED (${code}): ${message}` : `FAILED: ${message}`;
+    }
+
+    // Test RTDB
+    try {
+        if (!auth.currentUser) {
+            results.rtdb = 'FAILED (not-authenticated): Anda belum login';
+        } else {
+        await withTimeout(set(ref(rtdb, 'permission_test'), {
+            test: true,
+            updatedAt: new Date().toISOString(),
+            user: auth.currentUser?.email
+        }), 10000, 'Timeout: test RTDB terlalu lama');
+        await withTimeout(remove(ref(rtdb, 'permission_test')), 10000, 'Timeout: cleanup RTDB terlalu lama');
+        results.rtdb = 'OK';
+        }
+    } catch (e: any) {
+        const code = e?.code ? String(e.code) : '';
+        const message = e?.message ? String(e.message) : 'Unknown error';
+        results.rtdb = code ? `FAILED (${code}): ${message}` : `FAILED: ${message}`;
+    }
+
+    return results;
 };
 
 // Delete User
 export const deleteUser = async (userId: string): Promise<boolean> => {
     try {
         // Delete from Firestore
-        await deleteDoc(doc(db, USERS_COLLECTION, userId));
+        await withTimeout(deleteDoc(doc(db, USERS_COLLECTION, userId)), 10000, 'Timeout: hapus user terlalu lama');
 
         // Delete from RTDB
-        try {
-            await remove(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`));
-        } catch {
-        }
+        void withTimeout(remove(ref(rtdb, `${RTDB_PATHS.USERS}/${userId}`)), 8000, 'Timeout: hapus RTDB terlalu lama').catch(() => {});
 
         return true;
     } catch (error) {
-        console.error('Error deleting user:', error);
         return false;
     }
 };
@@ -232,9 +321,10 @@ export const setUserSubscription = async (
         endDate.setDate(startDate.getDate() + durationDays);
 
         // Update user's subscription end date
-        await updateUser(userId, {
+        const updated = await updateUser(userId, {
             subscriptionEnd: endDate.toISOString()
         });
+        if (!updated) return false;
 
         // Create subscription record
         const subscriptionData: Omit<SubscriptionRecord, 'id'> = {
@@ -248,11 +338,10 @@ export const setUserSubscription = async (
             createdAt: new Date().toISOString()
         };
 
-        await addDoc(collection(db, SUBSCRIPTIONS_COLLECTION), subscriptionData);
+        await withTimeout(addDoc(collection(db, SUBSCRIPTIONS_COLLECTION), subscriptionData), 10000, 'Timeout: simpan transaksi terlalu lama');
 
         return true;
     } catch (error) {
-        console.error('Error setting subscription:', error);
         return false;
     }
 };
@@ -261,16 +350,34 @@ export const subscribeToSubscriptionRecords = (callback: (records: SubscriptionR
     const refCol = collection(db, SUBSCRIPTIONS_COLLECTION);
     const q = query(refCol, orderBy('createdAt', 'desc'));
 
-    return onSnapshot(q, (snapshot) => {
-        const records: SubscriptionRecord[] = [];
-        snapshot.forEach((docSnap) => {
-            records.push({ ...docSnap.data(), id: docSnap.id } as SubscriptionRecord);
-        });
-        callback(records);
-    }, (error) => {
-        console.error('Error fetching transactions:', error);
-        callback([]);
-    });
+    let stopped = false;
+
+    const fetchOnce = async () => {
+        if (stopped) return;
+        try {
+            const snapshot = await withTimeout(getDocs(q), 10000, 'Timeout: ambil transaksi terlalu lama');
+            const records: SubscriptionRecord[] = [];
+            snapshot.forEach((docSnap) => {
+                const data: any = docSnap.data();
+                records.push({
+                    ...data,
+                    id: docSnap.id,
+                    createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAt
+                } as SubscriptionRecord);
+            });
+            callback(records);
+        } catch (error) {
+            console.error('Error fetching transactions:', error);
+            callback([]);
+        }
+    };
+
+    void fetchOnce();
+    const intervalId = setInterval(fetchOnce, 5000);
+    return () => {
+        stopped = true;
+        clearInterval(intervalId);
+    };
 };
 
 export const calculateTotalRevenue = (records: SubscriptionRecord[]): number => {
@@ -292,12 +399,11 @@ export const calculateTotalRevenue = (records: SubscriptionRecord[]): number => 
 // Remove User Subscription
 export const removeUserSubscription = async (userId: string): Promise<boolean> => {
     try {
-        await updateUser(userId, {
+        const updated = await updateUser(userId, {
             subscriptionEnd: null
         });
-        return true;
+        return updated;
     } catch (error) {
-        console.error('Error removing subscription:', error);
         return false;
     }
 };

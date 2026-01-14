@@ -47,7 +47,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       }
 
       onLogin(user);
-      navigate('/');
+      navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Terjadi kesalahan');
     } finally {
@@ -63,7 +63,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     try {
       const user = await signInWithGoogle();
       onLogin(user);
-      navigate('/');
+      navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Gagal login dengan Google');
     } finally {

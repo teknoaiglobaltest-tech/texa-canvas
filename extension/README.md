@@ -1,81 +1,51 @@
+
 # TEXA Tools Manager Extension
 
-Ekstensi Chrome untuk mengelola dan membuka tools dari dashboard TEXA secara aman dan terintegrasi.
+Ekstensi ini berfungsi sebagai jembatan antara dashboard TEXA dan browser Anda.
 
-## Fitur
+## Fitur Utama
 
-- 🔒 **Aman**: Tidak melakukan cookie injection ke situs pihak ketiga
-- 🚀 **Cepat**: Buka tools langsung dari popup ekstensi
-- 📱 **Terintegrasi**: Terhubung langsung dengan dashboard TEXA
-- 🔐 **Autentikasi**: Menggunakan Firebase ID token untuk keamanan
-- 🎯 **Mudah**: Interface yang user-friendly
+1.  **Open Tools**: Membuka tool dari dashboard dengan injeksi cookie otomatis.
+2.  **Cookie Injection**: Mengambil data cookie dari API URL yang ditentukan (mendukung format JSON Array atau dokumen Firestore).
+
+## Cara Kerja
+
+1.  Klik "Open Tools" di dashboard.
+2.  Dashboard mengirim pesan ke ekstensi dengan `targetUrl` dan `apiUrl`.
+3.  Ekstensi mengambil data dari `apiUrl`.
+4.  Ekstensi menyuntikkan cookie ke domain target.
+5.  Ekstensi membuka tab baru ke `targetUrl`.
+
+## Format Data API
+
+Ekstensi mendukung dua format respons dari `apiUrl`:
+
+### 1. JSON Array Standar
+```json
+[
+  {
+    "name": "session_id",
+    "value": "xyz123",
+    "domain": ".example.com",
+    "path": "/",
+    "secure": true,
+    "httpOnly": true
+  }
+]
+```
+
+### 2. Firestore Document (REST API)
+Jika Anda menggunakan URL Firestore langsung (`firestore.googleapis.com/...`), ekstensi akan mencari field yang berisi string JSON array cookies.
+Contoh Field Firestore: `stringValue: "[{...}, {...}]"`
 
 ## Instalasi
 
-1. Buka Chrome dan masuk ke `chrome://extensions/`
-2. Aktifkan "Developer mode"
-3. Klik "Load unpacked"
-4. Pilih folder `extension` dari project ini
-5. Ekstensi akan muncul di toolbar Chrome
-
-## Cara Penggunaan
-
-### Dari Dashboard TEXA
-1. Login ke dashboard TEXA
-2. Klik tombol "Open Tools" pada tool yang diinginkan
-3. Ekstensi akan otomatis membuka tool tersebut
-
-### Dari Popup Ekstensi
-1. Klik ikon ekstensi di toolbar Chrome
-2. Pastikan status menunjukkan "Terhubung"
-3. Klik tool yang ingin dibuka
-4. Tool akan terbuka di tab baru
-
-## Keamanan
-
-Ekstensi ini dirancang dengan prinsip keamanan:
-- Tidak menyimpan atau menginject cookies ke situs pihak ketiga
-- Hanya membuka URL yang sudah dikonfigurasi di dashboard
-- Menggunakan autentikasi Firebase untuk verifikasi user
-- Tidak memiliki akses ke data sensitif browser
-
-## Struktur File
-
-```
-extension/
-├── manifest.json          # Konfigurasi ekstensi
-├── popup.html            # Interface popup
-├── popup.js              # Logic popup
-├── background.js         # Background script
-├── contentScript.js      # Content script untuk dashboard
-└── README.md             # Dokumentasi
-```
-
-## Development
-
-Untuk development:
-1. Pastikan Anda sudah login ke dashboard TEXA
-2. Ekstensi akan otomatis terdeteksi dan terhubung
-3. Gunakan console browser untuk debugging
+1.  Buka `chrome://extensions/`.
+2.  Aktifkan "Developer mode" (pojok kanan atas).
+3.  Klik "Load unpacked".
+4.  Pilih folder `extension` ini.
 
 ## Troubleshooting
 
-### Ekstensi tidak terhubung
-- Pastikan Anda sudah login ke dashboard TEXA
-- Cek koneksi internet
-- Refresh halaman dashboard
-
-### Tools tidak bisa dibuka
-- Pastikan tool memiliki URL yang valid
-- Cek status subscription di dashboard
-- Hubungi admin jika masalah berlanjut
-
-## Catatan Keamanan
-
-Ekstensi ini **TIDAK** melakukan:
-- Inject cookies ke situs pihak ketiga
-- Akses data pribadi user
-- Modifikasi konten situs lain
-- Bypass autentikasi situs
-
-Ekstensi ini hanya membuka URL yang sudah dikonfigurasi di dashboard TEXA.
+-   **Tombol Open Tools tidak merespons**: Pastikan ekstensi aktif dan Anda telah merefresh halaman dashboard setelah instalasi.
+-   **Cookie tidak masuk**: Cek konsol ekstensi (Background page) untuk melihat log error. Pastikan format JSON cookie benar.

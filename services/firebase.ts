@@ -34,8 +34,22 @@ import {
   where,
   limit,
   Firestore
-} from "firebase/firestore";
-import { getDatabase, ref, set, Database } from "firebase/database";
+} from "firebase/firestore/lite";
+import { getDatabase, ref, set, update, Database } from "firebase/database";
+
+const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Timeout')), ms);
+      })
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 const getAuthErrorMessage = (error: any, fallbackMessage: string): string => {
   const code = error?.code as string | undefined;
@@ -94,7 +108,8 @@ const TEXA_FIREBASE_CONFIG = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || PRIMARY_CONFIG.projectId,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || PRIMARY_CONFIG.storageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || PRIMARY_CONFIG.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || PRIMARY_CONFIG.appId
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || PRIMARY_CONFIG.appId,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || (PRIMARY_CONFIG as any).databaseURL || BACKUP_CONFIG.databaseURL
 };
 
 // ============================================
@@ -165,7 +180,7 @@ const checkIfAdmin = (email: string): boolean => {
 // Create or Update User in Firestore
 const saveUserToDatabase = async (firebaseUser: FirebaseUser, additionalData?: Partial<TexaUser>): Promise<TexaUser> => {
   const userRef = doc(db, COLLECTIONS.USERS, firebaseUser.uid);
-  const userSnap = await getDoc(userRef);
+  const userSnap = await withTimeout(getDoc(userRef), 8000);
 
   const isAdmin = checkIfAdmin(firebaseUser.email || '');
   const normalizedEmail = (firebaseUser.email || '').trim().toLowerCase();
@@ -174,7 +189,7 @@ const saveUserToDatabase = async (firebaseUser: FirebaseUser, additionalData?: P
   if (normalizedEmail) {
     const usersRef = collection(db, COLLECTIONS.USERS);
     const q = query(usersRef, where('email', '==', normalizedEmail), limit(5));
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q), 8000);
     for (const d of snap.docs) {
       if (d.id !== firebaseUser.uid) {
         preCreatedDoc = { id: d.id, data: d.data() as Partial<TexaUser> };
@@ -212,38 +227,38 @@ const saveUserToDatabase = async (firebaseUser: FirebaseUser, additionalData?: P
     const cleanData = Object.fromEntries(
       Object.entries(userData).filter(([_, v]) => v !== undefined)
     );
-    await setDoc(userRef, cleanData);
+    await withTimeout(setDoc(userRef, cleanData), 8000);
 
     // Also save to Realtime Database
-    await set(ref(rtdb, `${RTDB_PATHS.USERS}/${firebaseUser.uid}`), {
-      email: userData.email,
-      name: userData.name,
-      role: userData.role,
-      isActive: userData.isActive,
-      lastLogin: userData.lastLogin
-    });
+    void withTimeout(set(ref(rtdb, `${RTDB_PATHS.USERS}/${firebaseUser.uid}`), {
+        email: userData.email,
+        name: userData.name,
+        role: userData.role,
+        isActive: userData.isActive,
+        lastLogin: userData.lastLogin
+      }), 8000).catch(() => {});
   } else {
     // Existing user - update last login
-    await setDoc(userRef, {
+    await withTimeout(setDoc(userRef, {
       lastLogin: userData.lastLogin,
       ...(preCreatedDoc?.data?.subscriptionEnd ? { subscriptionEnd: preCreatedDoc.data.subscriptionEnd } : {}),
       ...(preCreatedDoc?.data?.role ? { role: preCreatedDoc.data.role } : {}),
       ...(typeof preCreatedDoc?.data?.isActive === 'boolean' ? { isActive: preCreatedDoc.data.isActive } : {}),
       ...(preCreatedDoc?.data?.createdAt ? { createdAt: preCreatedDoc.data.createdAt } : {})
-    }, { merge: true });
+    }, { merge: true }), 8000);
 
     // Update RTDB
-    await set(ref(rtdb, `${RTDB_PATHS.USERS}/${firebaseUser.uid}/lastLogin`), userData.lastLogin);
+    void withTimeout(set(ref(rtdb, `${RTDB_PATHS.USERS}/${firebaseUser.uid}/lastLogin`), userData.lastLogin), 8000).catch(() => {});
   }
 
   if (preCreatedDoc?.id) {
     try {
-      await deleteDoc(doc(db, COLLECTIONS.USERS, preCreatedDoc.id));
+      await withTimeout(deleteDoc(doc(db, COLLECTIONS.USERS, preCreatedDoc.id)), 8000);
     } catch {
     }
   }
 
-  const updatedSnap = await getDoc(userRef);
+  const updatedSnap = await withTimeout(getDoc(userRef), 8000);
   return updatedSnap.data() as TexaUser;
 };
 
@@ -252,8 +267,19 @@ export const signInWithGoogle = async (): Promise<TexaUser> => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
-    const texaUser = await saveUserToDatabase(user);
-    return texaUser;
+    void saveUserToDatabase(user).catch(() => {});
+    const existing = await getCurrentUserData(user.uid);
+    if (existing) return existing;
+    return {
+      id: user.uid,
+      email: (user.email || '').trim().toLowerCase(),
+      name: user.displayName || 'Pengguna',
+      role: checkIfAdmin(user.email || '') ? 'ADMIN' : 'MEMBER',
+      subscriptionEnd: null,
+      isActive: true,
+      photoURL: user.photoURL || undefined,
+      lastLogin: new Date().toISOString()
+    };
   } catch (error: any) {
     console.error('Google Sign In Error:', error);
     throw new Error(getAuthErrorMessage(error, 'Gagal login dengan Google'));
@@ -265,8 +291,19 @@ export const signInWithEmail = async (email: string, password: string): Promise<
   try {
     const result = await signInWithEmailAndPassword(auth, email, password);
     const user = result.user;
-    const texaUser = await saveUserToDatabase(user);
-    return texaUser;
+    void saveUserToDatabase(user).catch(() => {});
+    const existing = await getCurrentUserData(user.uid);
+    if (existing) return existing;
+    return {
+      id: user.uid,
+      email: (user.email || '').trim().toLowerCase(),
+      name: user.displayName || 'Pengguna',
+      role: checkIfAdmin(user.email || '') ? 'ADMIN' : 'MEMBER',
+      subscriptionEnd: null,
+      isActive: true,
+      photoURL: user.photoURL || undefined,
+      lastLogin: new Date().toISOString()
+    };
   } catch (error: any) {
     console.error('Email Sign In Error:', error);
     throw new Error(getAuthErrorMessage(error, 'Gagal login'));
@@ -279,8 +316,17 @@ export const signUpWithEmail = async (email: string, password: string, name: str
     const result = await createUserWithEmailAndPassword(auth, email, password);
     const user = result.user;
     await updateProfile(user, { displayName: name });
-    const texaUser = await saveUserToDatabase(user, { name });
-    return texaUser;
+    void saveUserToDatabase(user, { name }).catch(() => {});
+    return {
+      id: user.uid,
+      email: (user.email || '').trim().toLowerCase(),
+      name,
+      role: checkIfAdmin(user.email || '') ? 'ADMIN' : 'MEMBER',
+      subscriptionEnd: null,
+      isActive: true,
+      photoURL: user.photoURL || undefined,
+      lastLogin: new Date().toISOString()
+    };
   } catch (error: any) {
     console.error('Email Sign Up Error:', error);
     const code = error?.code as string | undefined;
@@ -316,7 +362,7 @@ export const sendResetPassword = async (email: string): Promise<void> => {
 export const getCurrentUserData = async (uid: string): Promise<TexaUser | null> => {
   try {
     const userRef = doc(db, COLLECTIONS.USERS, uid);
-    const userSnap = await getDoc(userRef);
+    const userSnap = await withTimeout(getDoc(userRef), 8000);
 
     if (userSnap.exists()) {
       return userSnap.data() as TexaUser;
@@ -338,7 +384,7 @@ export const onAuthChange = (callback: (user: TexaUser | null) => void) => {
           callback(texaUser);
         } else {
           try {
-            const newUser = await saveUserToDatabase(firebaseUser);
+            const newUser = await withTimeout(saveUserToDatabase(firebaseUser), 10000);
             callback(newUser);
           } catch (saveError) {
             console.warn('Could not save user to Firestore:', saveError);

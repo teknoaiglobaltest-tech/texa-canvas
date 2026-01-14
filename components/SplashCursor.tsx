@@ -54,8 +54,8 @@ function pointerPrototype(): Pointer {
 
 export default function SplashCursor({
   SIM_RESOLUTION = 128,
-  DYE_RESOLUTION = 1440,
-  CAPTURE_RESOLUTION = 512,
+  DYE_RESOLUTION = 720,
+  CAPTURE_RESOLUTION = 256,
   DENSITY_DISSIPATION = 3.5,
   VELOCITY_DISSIPATION = 2,
   PRESSURE = 0.1,
@@ -68,6 +68,12 @@ export default function SplashCursor({
   BACK_COLOR = { r: 0.5, g: 0, b: 0 },
   TRANSPARENT = true
 }: SplashCursorProps) {
+  const isCoarsePointer = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+  const prefersReducedMotion =
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  if (isCoarsePointer || prefersReducedMotion) return null;
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -830,7 +836,7 @@ export default function SplashCursor({
     }
 
     function scaleByPixelRatio(input: number) {
-      const pixelRatio = window.devicePixelRatio || 1;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       return Math.floor(input * pixelRatio);
     }
 
@@ -839,15 +845,31 @@ export default function SplashCursor({
 
     let lastUpdateTime = Date.now();
     let colorUpdateTimer = 0.0;
+    let lastInteractionAt = 0;
+    let running = false;
+    let animationFrameId: number | null = null;
 
     function updateFrame() {
+      if (!running) return;
+      if (document.hidden) {
+        animationFrameId = requestAnimationFrame(updateFrame);
+        return;
+      }
+
+      if (Date.now() - lastInteractionAt > 1200) {
+        running = false;
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+        return;
+      }
+
       const dt = calcDeltaTime();
       if (resizeCanvas()) initFramebuffers();
       updateColors(dt);
       applyInputs();
       step(dt);
       render(null);
-      requestAnimationFrame(updateFrame);
+      animationFrameId = requestAnimationFrame(updateFrame);
     }
 
     function calcDeltaTime() {
@@ -868,6 +890,14 @@ export default function SplashCursor({
       }
       return false;
     }
+
+    const start = () => {
+      lastInteractionAt = Date.now();
+      if (running) return;
+      running = true;
+      lastUpdateTime = Date.now();
+      animationFrameId = requestAnimationFrame(updateFrame);
+    };
 
     function updateColors(dt: number) {
       colorUpdateTimer += dt * config.COLOR_UPDATE_SPEED;
@@ -1179,6 +1209,7 @@ export default function SplashCursor({
       const pointer = pointers[0];
       const posX = scaleByPixelRatio(e.clientX);
       const posY = scaleByPixelRatio(e.clientY);
+      start();
       updatePointerDownData(pointer, -1, posX, posY);
       clickSplat(pointer);
     };
@@ -1188,7 +1219,7 @@ export default function SplashCursor({
       const posX = scaleByPixelRatio(e.clientX);
       const posY = scaleByPixelRatio(e.clientY);
       const color = generateColor();
-      updateFrame();
+      start();
       updatePointerMoveData(pointer, posX, posY, color);
       document.body.removeEventListener('mousemove', handleFirstMouseMove);
     };
@@ -1199,6 +1230,7 @@ export default function SplashCursor({
       const posX = scaleByPixelRatio(e.clientX);
       const posY = scaleByPixelRatio(e.clientY);
       const color = pointer.color;
+      start();
       updatePointerMoveData(pointer, posX, posY, color);
     };
 
@@ -1208,7 +1240,7 @@ export default function SplashCursor({
       for (let i = 0; i < touches.length; i++) {
         const posX = scaleByPixelRatio(touches[i].clientX);
         const posY = scaleByPixelRatio(touches[i].clientY);
-        updateFrame();
+        start();
         updatePointerDownData(pointer, touches[i].identifier, posX, posY);
       }
       document.body.removeEventListener('touchstart', handleFirstTouchStart);
@@ -1218,6 +1250,7 @@ export default function SplashCursor({
     const onTouchStart = (e: TouchEvent) => {
       const touches = e.targetTouches;
       const pointer = pointers[0];
+      start();
       for (let i = 0; i < touches.length; i++) {
         const posX = scaleByPixelRatio(touches[i].clientX);
         const posY = scaleByPixelRatio(touches[i].clientY);
@@ -1228,6 +1261,7 @@ export default function SplashCursor({
     const onTouchMove = (e: TouchEvent) => {
       const touches = e.targetTouches;
       const pointer = pointers[0];
+      start();
       for (let i = 0; i < touches.length; i++) {
         const posX = scaleByPixelRatio(touches[i].clientX);
         const posY = scaleByPixelRatio(touches[i].clientY);
@@ -1245,16 +1279,26 @@ export default function SplashCursor({
 
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('touchstart', onTouchStart, false);
-    window.addEventListener('touchmove', onTouchMove, false);
-    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+
+    const onVisibilityChange = () => {
+      if (!document.hidden && running) lastUpdateTime = Date.now();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
+      running = false;
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
+      document.body.removeEventListener('mousemove', handleFirstMouseMove);
+      document.body.removeEventListener('touchstart', handleFirstTouchStart);
     };
   }, [
     SIM_RESOLUTION,
@@ -1279,7 +1323,7 @@ export default function SplashCursor({
         position: 'fixed',
         top: 0,
         left: 0,
-        zIndex: 50,
+        zIndex: 0,
         pointerEvents: 'none',
         width: '100%',
         height: '100%'
