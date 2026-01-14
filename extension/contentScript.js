@@ -17,6 +17,24 @@ window.addEventListener('message', async (event) => {
       console.error('Error sending message to background:', err);
     }
   }
+
+  if (event.data.type && event.data.type === 'TEXA_SYNC_SESSION') {
+    console.log('ContentScript received SYNC_SESSION:', event.data);
+    const sessionData = event.data.data;
+    
+    if (sessionData) {
+      chrome.storage.local.set({
+        'texa_origin': sessionData.origin,
+        'texa_token': sessionData.token,
+        'texa_user': sessionData.user,
+        'last_sync': Date.now()
+      }, () => {
+        console.log('TEXA Extension: Session synced to storage');
+        // Notify background to show notification
+        chrome.runtime.sendMessage({ type: 'TEXA_LOGIN_SUCCESS' });
+      });
+    }
+  }
 });
 
 // 2. Inject helper script to expose window.TEXAExtension API

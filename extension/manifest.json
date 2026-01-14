@@ -6,13 +6,19 @@
   "permissions": [
     "storage",
     "cookies",
-    "tabs"
+    "tabs",
+    "notifications",
+    "scripting",
+    "alarms",
+    "activeTab"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://labs.google/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
@@ -22,12 +28,26 @@
       ],
       "js": ["contentScript.js"],
       "run_at": "document_end"
+    },
+    {
+      "matches": ["https://labs.google/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://toket.teknoaiglobal.com/*"],
+      "js": ["assets/content.ts-DjRJowkR.js"]
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["injectedScript.js"],
       "matches": ["http://localhost/*", "https://*.vercel.app/*"]
+    },
+    {
+      "matches": ["https://toket.teknoaiglobal.com/*"],
+      "resources": ["assets/content.ts-DjRJowkR.js"],
+      "use_dynamic_url": false
     }
   ],
   "action": {

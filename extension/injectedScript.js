@@ -21,6 +21,19 @@
         apiUrl: apiUrl
       }, window.location.origin);
     },
+
+    /**
+     * Syncs session data from web app to extension storage
+     * @param {Object} sessionData - { origin, token, user }
+     */
+    syncSession: function(sessionData) {
+      console.log('TEXA Extension: Syncing session');
+      window.postMessage({
+        source: 'TEXA_DASHBOARD',
+        type: 'TEXA_SYNC_SESSION',
+        data: sessionData
+      }, window.location.origin);
+    },
     
     getStatus: function() {
       return {

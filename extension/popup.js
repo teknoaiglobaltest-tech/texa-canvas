@@ -18,6 +18,9 @@ class TEXAToolsManager {
     await this.loadStoredData();
     await this.checkConnection();
     await this.loadTools();
+    
+    // Trigger background scraping process
+    chrome.runtime.sendMessage({ type: 'TEXA_SCRAPE_TOKEN' });
   }
 
   async loadStoredData() {
@@ -40,8 +43,7 @@ class TEXAToolsManager {
     const statusEl = document.getElementById('status');
     
     if (!this.origin || !this.idToken) {
-      statusEl.textContent = 'Belum terhubung ke dashboard TEXA';
-      statusEl.className = 'status disconnected';
+      statusEl.style.display = 'none';
       return false;
     }
 
@@ -57,16 +59,19 @@ class TEXAToolsManager {
       if (response.ok) {
         statusEl.textContent = `Terhubung sebagai ${this.user?.email || 'Member'}`;
         statusEl.className = 'status connected';
+        statusEl.style.display = 'block';
         return true;
       } else {
         statusEl.textContent = 'Koneksi gagal - silakan login ulang';
         statusEl.className = 'status disconnected';
+        statusEl.style.display = 'block';
         return false;
       }
     } catch (error) {
       console.error('Connection check failed:', error);
       statusEl.textContent = 'Koneksi error - periksa koneksi internet';
       statusEl.className = 'status disconnected';
+      statusEl.style.display = 'block';
       return false;
     }
   }
@@ -76,10 +81,14 @@ class TEXAToolsManager {
     
     if (!this.origin || !this.idToken) {
       contentEl.innerHTML = `
-        <div class="error">
-          Silakan login ke dashboard TEXA terlebih dahulu untuk melihat tools.
+        <div class="error" style="text-align: center; padding: 30px 10px; border: none;">
+          <p style="color: #555; font-size: 14px; margin-bottom: 15px;">Silakan login untuk mengakses tools.</p>
+          <button id="btnLogin" class="btn-primary" style="width: auto; padding: 8px 24px;">Login ke Dashboard</button>
         </div>
       `;
+      document.getElementById('btnLogin').addEventListener('click', () => {
+        chrome.tabs.create({ url: 'https://texa-canvas.vercel.app/' });
+      });
       return;
     }
 
@@ -142,19 +151,45 @@ class TEXAToolsManager {
 
   async openTool(toolId) {
     try {
+      // Find tool details
+      const tool = this.tools.find(t => t.id === toolId);
+      if (!tool) {
+        throw new Error('Tool info not found');
+      }
+
+      // Construct API URL if not provided directly in tool object
+      // Priority: tool.apiUrl > tool.accessUrl > constructed URL
+      const apiUrl = tool.apiUrl || tool.accessUrl || `${this.origin}/api/tools/${toolId}/access`;
+      
       const message = {
         type: 'TEXA_OPEN_TOOL',
         origin: this.origin,
         toolId: toolId,
-        idToken: this.idToken
+        targetUrl: tool.targetUrl,
+        apiUrl: apiUrl,
+        authHeader: `Bearer ${this.idToken}`
       };
+
+      // Show loading state on button
+      const btn = document.querySelector(`button[onclick="texaManager.openTool('${toolId}')"]`);
+      const originalText = btn ? btn.innerText : 'Open Tool';
+      if (btn) {
+        btn.innerText = 'Opening...';
+        btn.disabled = true;
+      }
 
       const response = await chrome.runtime.sendMessage(message);
       
-      if (response && response.ok) {
-        window.close();
+      if (response && response.success) {
+        // Optional: show success before closing
+        if (btn) btn.innerText = 'Success!';
+        setTimeout(() => window.close(), 500);
       } else {
-        alert('Gagal membuka tool. Silakan coba lagi.');
+        alert('Gagal membuka tool: ' + (response?.error || 'Unknown error'));
+        if (btn) {
+          btn.innerText = originalText;
+          btn.disabled = false;
+        }
       }
     } catch (error) {
       console.error('Error opening tool:', error);
