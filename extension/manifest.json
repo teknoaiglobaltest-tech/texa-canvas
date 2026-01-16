@@ -47,6 +47,15 @@
     },
     {
       "matches": [
+        "https://accounts.google.com/*"
+      ],
+      "js": [
+        "autoLoginScript.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://toket.teknoaiglobal.com/*"
       ],
       "js": [
