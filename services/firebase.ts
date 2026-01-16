@@ -177,6 +177,7 @@ export interface TexaUser {
 const ADMIN_EMAILS = [
   'teknoaiglobal@gmail.com',
   'teknoaurora@gmail.com',
+  'tekno.x.aurora@gmail.com',  // Added as admin
   'admin@texa.id'
 ];
 
