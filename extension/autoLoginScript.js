@@ -5,61 +5,78 @@
 // =============================================
 
 (function () {
-    console.log('TEXA: Auto-Login Script Active on', window.location.href);
+    'use strict';
 
-    // Check if this is the account chooser page
-    const isAccountChooser = window.location.href.includes('accounts.google.com') &&
-        (window.location.href.includes('accountchooser') ||
-            window.location.href.includes('signin') ||
-            window.location.href.includes('oauth'));
+    console.log('🔐 TEXA Auto-Login: Script loaded on', window.location.href);
 
-    if (!isAccountChooser) {
-        console.log('TEXA: Not account chooser page, skipping');
+    // Only run on relevant pages
+    if (!window.location.href.includes('accounts.google.com')) {
         return;
     }
 
-    // Function to find and click the first available account
-    function autoSelectAccount() {
-        console.log('TEXA: Looking for Google accounts to click...');
+    // Mark that we're running
+    if (window.__TEXA_AUTO_LOGIN_ACTIVE__) {
+        console.log('🔐 TEXA Auto-Login: Already running, skipping');
+        return;
+    }
+    window.__TEXA_AUTO_LOGIN_ACTIVE__ = true;
 
-        // Multiple selectors for different Google sign-in page variants
-        const accountSelectors = [
-            // Account list items (div with data-identifier)
-            'div[data-identifier]',
-            // Account buttons in list
-            '.JDAKTe',
-            // Account row containers
-            '.aZvCDf',
-            // Email/name text that's clickable
-            '.lCoei.YZVTmd',
-            // Use different account link
-            '.BHzsHc',
-            // Primary account container
-            '.Xb9hP',
-            // Account card
-            '.g6SGLF'
-        ];
+    let clickAttempts = 0;
+    const MAX_ATTEMPTS = 20;
 
-        for (const selector of accountSelectors) {
-            const accounts = document.querySelectorAll(selector);
-            if (accounts.length > 0) {
-                console.log(`TEXA: Found ${accounts.length} account(s) with selector: ${selector}`);
+    // Function to find and click account
+    function tryClickAccount() {
+        clickAttempts++;
+        console.log(`🔐 TEXA Auto-Login: Attempt ${clickAttempts}/${MAX_ATTEMPTS}`);
 
-                // Click the first account (primary account)
-                const firstAccount = accounts[0];
-                console.log('TEXA: Auto-clicking first account...');
+        // Method 1: Find account by data-identifier attribute (most reliable)
+        const accountsById = document.querySelectorAll('[data-identifier]');
+        if (accountsById.length > 0) {
+            console.log('🔐 TEXA: Found', accountsById.length, 'account(s) by data-identifier');
+            const firstAccount = accountsById[0];
+            console.log('🔐 TEXA: Clicking account:', firstAccount.getAttribute('data-identifier'));
+            firstAccount.click();
+            notifyBackground('clicked_account');
+            return true;
+        }
 
-                // Trigger click
-                firstAccount.click();
+        // Method 2: Find by email text pattern in the page
+        const allDivs = document.querySelectorAll('div[role="link"], div[data-email], li[data-value]');
+        for (const div of allDivs) {
+            const text = div.textContent || '';
+            if (text.includes('@gmail.com') || text.includes('@googlemail.com')) {
+                console.log('🔐 TEXA: Found account by email pattern:', text.substring(0, 30));
+                div.click();
+                notifyBackground('clicked_email');
+                return true;
+            }
+        }
 
-                // Also try dispatching events for more reliability
-                firstAccount.dispatchEvent(new MouseEvent('click', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window
-                }));
+        // Method 3: Find the main account container (JDAKTe is Google's class for account items)
+        const accountContainers = document.querySelectorAll('.JDAKTe, .d2CFce, .rFrNMe');
+        if (accountContainers.length > 0) {
+            console.log('🔐 TEXA: Found', accountContainers.length, 'account container(s)');
+            accountContainers[0].click();
+            notifyBackground('clicked_container');
+            return true;
+        }
 
-                console.log('TEXA: Account clicked!');
+        // Method 4: Look for clickable elements with user profile info
+        const profileDivs = document.querySelectorAll('[data-profile-identifier], .lCoei, .Xb9hP');
+        if (profileDivs.length > 0) {
+            console.log('🔐 TEXA: Found profile div');
+            profileDivs[0].click();
+            notifyBackground('clicked_profile');
+            return true;
+        }
+
+        // Method 5: Find any ul li that looks like an account list
+        const listItems = document.querySelectorAll('ul li[role="button"], ul li[tabindex="0"]');
+        for (const li of listItems) {
+            if (li.textContent && li.textContent.includes('@')) {
+                console.log('🔐 TEXA: Found account in list');
+                li.click();
+                notifyBackground('clicked_list');
                 return true;
             }
         }
@@ -67,96 +84,106 @@
         return false;
     }
 
-    // Function to click "Continue" or "Allow" buttons
-    function autoClickContinue() {
-        const continueSelectors = [
-            // Continue button
-            'button[data-idom-class*="continue"]',
-            '#continue',
-            'button:contains("Continue")',
-            // Allow button for permissions
-            '#submit_approve_access',
-            'button[data-idom-class*="allow"]',
-            // Next button
-            'button.VfPpkd-LgbsSe[type="button"]',
-            // Primary action button
-            '.VfPpkd-LgbsSe-OWXEXe-k8QpJ'
+    // Function to click Continue/Next/Allow buttons
+    function tryClickContinue() {
+        // Common button patterns for Google
+        const buttonPatterns = [
+            { selector: 'button[type="submit"]', check: null },
+            {
+                selector: 'button.VfPpkd-LgbsSe', check: (el) => {
+                    const text = el.textContent.toLowerCase();
+                    return text.includes('next') || text.includes('continue') || text.includes('lanjutkan') ||
+                        text.includes('berikutnya') || text.includes('allow') || text.includes('izinkan');
+                }
+            },
+            { selector: '#continue', check: null },
+            { selector: '#submit_approve_access', check: null },
+            { selector: 'input[type="submit"]', check: null },
+            { selector: '[data-idom-class="nCP5yc"]', check: null }
         ];
 
-        for (const selector of continueSelectors) {
-            try {
-                const buttons = document.querySelectorAll(selector);
-                for (const button of buttons) {
-                    const text = button.textContent?.toLowerCase() || '';
-                    if (text.includes('continue') || text.includes('allow') || text.includes('next') ||
-                        text.includes('lanjutkan') || text.includes('izinkan')) {
-                        console.log('TEXA: Auto-clicking continue/allow button...');
-                        button.click();
-                        return true;
-                    }
+        for (const pattern of buttonPatterns) {
+            const elements = document.querySelectorAll(pattern.selector);
+            for (const el of elements) {
+                if (!pattern.check || pattern.check(el)) {
+                    console.log('🔐 TEXA: Clicking button:', el.textContent?.substring(0, 20));
+                    el.click();
+                    return true;
                 }
-            } catch (e) { }
+            }
         }
-
         return false;
     }
 
-    // Run with retries
-    let attempts = 0;
-    const maxAttempts = 10;
-
-    const interval = setInterval(() => {
-        attempts++;
-        console.log(`TEXA: Auto-login attempt ${attempts}/${maxAttempts}`);
-
-        // Try to select account first
-        if (autoSelectAccount()) {
-            clearInterval(interval);
-            console.log('TEXA: Auto-login completed!');
-
-            // Notify background script
+    // Notify background script
+    function notifyBackground(action) {
+        try {
             chrome.runtime.sendMessage({
                 type: 'TEXA_AUTO_LOGIN_CLICKED',
+                action: action,
                 url: window.location.href
             });
-            return;
+        } catch (e) {
+            console.log('🔐 TEXA: Could not notify background:', e.message);
         }
+    }
 
-        // Try to click continue/allow
-        if (autoClickContinue()) {
-            console.log('TEXA: Clicked continue/allow, waiting for next step...');
-            // Don't stop interval, might need more clicks
-        }
+    // Main polling loop
+    function startPolling() {
+        const interval = setInterval(() => {
+            if (clickAttempts >= MAX_ATTEMPTS) {
+                console.log('🔐 TEXA Auto-Login: Max attempts reached');
+                clearInterval(interval);
+                return;
+            }
 
-        if (attempts >= maxAttempts) {
+            // First try to click account
+            if (tryClickAccount()) {
+                console.log('🔐 TEXA: Account clicked successfully!');
+                // Don't clear interval yet - might need to click continue buttons too
+            }
+
+            // Also try continue buttons
+            tryClickContinue();
+
+        }, 1000);
+
+        // Cleanup after 30 seconds
+        setTimeout(() => {
             clearInterval(interval);
-            console.log('TEXA: Max attempts reached, manual login may be required');
-        }
-    }, 1500);
+            console.log('🔐 TEXA Auto-Login: Timeout, stopping');
+        }, 30000);
+    }
 
-    // Initial delay before starting
-    setTimeout(() => {
-        autoSelectAccount() || autoClickContinue();
-    }, 1000);
+    // Start immediately if page is ready
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        console.log('🔐 TEXA Auto-Login: Page ready, starting...');
+        setTimeout(startPolling, 500);
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🔐 TEXA Auto-Login: DOM loaded, starting...');
+            setTimeout(startPolling, 500);
+        });
+    }
 
-    // Also observe DOM changes for dynamic content
+    // Also observe for dynamic content
     const observer = new MutationObserver((mutations) => {
+        // If new content is added, try clicking again
         for (const mutation of mutations) {
             if (mutation.addedNodes.length > 0) {
-                // New content loaded, try to click
                 setTimeout(() => {
-                    autoSelectAccount() || autoClickContinue();
-                }, 500);
+                    tryClickAccount() || tryClickContinue();
+                }, 300);
+                break;
             }
         }
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true
+    });
 
-    // Cleanup after 30 seconds
-    setTimeout(() => {
-        clearInterval(interval);
-        observer.disconnect();
-    }, 30000);
+    console.log('🔐 TEXA Auto-Login: Initialized and waiting...');
 
 })();
