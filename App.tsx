@@ -10,6 +10,7 @@ import Hero from './components/Hero';
 import SplashCursor from './components/SplashCursor';
 import ToolIframePage from './components/ToolIframePage';
 import { onAuthChange, logOut, TexaUser } from './services/firebase';
+import { PopupProvider, usePopup } from './services/popupContext';
 import toketHtml from './tambahan/toket.txt?raw';
 
 // Inner component that has access to useLocation
@@ -19,6 +20,7 @@ const AppContent: React.FC<{
   onLogout: () => void;
 }> = ({ user, onLogin, onLogout }) => {
   const location = useLocation();
+  const { isAnyPopupOpen } = usePopup();
 
   // Check if current route should hide header/footer
   const isAdminPage = location.pathname === '/admin';
@@ -27,12 +29,22 @@ const AppContent: React.FC<{
   const isToolIframePage = location.pathname.startsWith('/tool/');
   const hideHeaderFooter = isAdminPage || isLoginPage || isToketPage || isToolIframePage;
 
+  // Hide header/footer when any popup is open
+  const shouldHideNavigation = hideHeaderFooter || isAnyPopupOpen;
+
   return (
     <div className="min-h-screen flex flex-col relative">
       <SplashCursor />
 
-      {/* Conditionally render Navbar - hidden on admin and login pages */}
-      {!hideHeaderFooter && <Navbar user={user} onLogout={onLogout} />}
+      {/* Conditionally render Navbar - hidden on admin/login pages and when popup is open */}
+      <div
+        className={`transition-all duration-300 ease-in-out ${shouldHideNavigation
+            ? 'opacity-0 pointer-events-none h-0 overflow-hidden'
+            : 'opacity-100'
+          }`}
+      >
+        {!hideHeaderFooter && <Navbar user={user} onLogout={onLogout} />}
+      </div>
 
       <main className={`flex-grow container mx-auto px-4 relative z-10 ${hideHeaderFooter ? 'py-4' : 'py-8'}`}>
         <Routes>
@@ -82,23 +94,30 @@ const AppContent: React.FC<{
         </Routes>
       </main>
 
-      {/* Conditionally render Footer - hidden on admin and login pages */}
-      {!hideHeaderFooter && (
-        <footer className="border-t border-white/10 py-10 glass mt-12 relative z-10">
-          <div className="container mx-auto px-4 text-center text-gray-400">
-            <p className="text-xl font-bold text-white mb-2">TEXA-TOOLS</p>
-            <p className="text-sm">Premium AI Tools Marketplace & Session Manager.</p>
-            <div className="mt-4 text-xs">
-              &copy; {new Date().getFullYear()} Texa Group. All rights reserved.
-            </div>
-            {user && (
-              <div className="mt-2 text-[10px] text-slate-600">
-                Logged in as: {user.email} ({user.role})
+      {/* Conditionally render Footer - hidden on admin/login pages and when popup is open */}
+      <div
+        className={`transition-all duration-300 ease-in-out ${shouldHideNavigation
+            ? 'opacity-0 pointer-events-none h-0 overflow-hidden'
+            : 'opacity-100'
+          }`}
+      >
+        {!hideHeaderFooter && (
+          <footer className="border-t border-white/10 py-6 md:py-10 glass mt-8 md:mt-12 relative z-10">
+            <div className="container mx-auto px-4 text-center text-gray-400">
+              <p className="text-lg md:text-xl font-bold text-white mb-2">TEXA-TOOLS</p>
+              <p className="text-xs md:text-sm">Premium AI Tools Marketplace & Session Manager.</p>
+              <div className="mt-3 md:mt-4 text-[10px] md:text-xs">
+                &copy; {new Date().getFullYear()} Texa Group. All rights reserved.
               </div>
-            )}
-          </div>
-        </footer>
-      )}
+              {user && (
+                <div className="mt-2 text-[9px] md:text-[10px] text-slate-600">
+                  Logged in as: {user.email} ({user.role})
+                </div>
+              )}
+            </div>
+          </footer>
+        )}
+      </div>
     </div>
   );
 };
@@ -199,7 +218,9 @@ const App: React.FC = () => {
 
   return (
     <Router>
-      <AppContent user={user} onLogin={handleLogin} onLogout={handleLogout} />
+      <PopupProvider>
+        <AppContent user={user} onLogin={handleLogin} onLogout={handleLogout} />
+      </PopupProvider>
     </Router>
   );
 };

@@ -3,6 +3,11 @@
   "name": "TEXA Tools Manager",
   "version": "1.0.0",
   "description": "Mengelola tools dari dashboard TEXA secara aman dan terintegrasi.",
+  "icons": {
+    "16": "icon/icon16.png",
+    "48": "icon/icon48.png",
+    "128": "icon/icon128.png"
+  },
   "permissions": [
     "storage",
     "cookies",
@@ -16,9 +21,15 @@
     "identity"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "https://labs.google/*"
+    "<all_urls>"
   ],
+  "oauth2": {
+    "client_id": "246018596207-12u4oi8t645pjeqrdvh28duuatofochp.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -38,19 +49,12 @@
     },
     {
       "matches": [
-        "https://labs.google/*"
+        "https://labs.google/*",
+        "*://labs.google/*"
       ],
       "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://accounts.google.com/*"
-      ],
-      "js": [
-        "autoLoginScript.js"
+        "content.js",
+        "overlayScript.js"
       ],
       "run_at": "document_idle"
     },
@@ -81,10 +85,25 @@
         "assets/content.ts-DjRJowkR.js"
       ],
       "use_dynamic_url": false
+    },
+    {
+      "resources": [
+        "icon/icon16.png",
+        "icon/icon48.png",
+        "icon/icon128.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "TEXA Tools Manager"
+    "default_title": "TEXA Tools Manager",
+    "default_icon": {
+      "16": "icon/icon16.png",
+      "48": "icon/icon48.png",
+      "128": "icon/icon128.png"
+    }
   }
 }

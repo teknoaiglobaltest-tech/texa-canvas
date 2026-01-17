@@ -18,14 +18,38 @@ window.addEventListener('message', async (event) => {
 
     console.log('TEXA ContentScript received:', event.data.type);
 
+    // Handle TEXA_EXTENSION_PING message (for extension detection)
+    if (event.data.type === 'TEXA_EXTENSION_PING') {
+        console.log('ContentScript: Responding to PING');
+        window.postMessage({
+            type: 'TEXA_EXTENSION_PONG',
+            requestId: event.data.requestId,
+            source: 'TEXA_EXTENSION'
+        }, window.location.origin);
+        return;
+    }
+
     // Handle TEXA_OPEN_TOOL message
     if (event.data.type === 'TEXA_OPEN_TOOL') {
         console.log('ContentScript: Forwarding OPEN_TOOL to background');
         try {
             const response = await chrome.runtime.sendMessage(event.data);
             console.log('Background response:', response);
+
+            // Send ACK back to the page
+            window.postMessage({
+                type: 'TEXA_OPEN_TOOL_ACK',
+                requestId: event.data.requestId,
+                ok: true
+            }, window.location.origin);
         } catch (err) {
             console.error('Error sending to background:', err);
+            window.postMessage({
+                type: 'TEXA_OPEN_TOOL_ACK',
+                requestId: event.data.requestId,
+                ok: false,
+                error: err.message
+            }, window.location.origin);
         }
     }
 

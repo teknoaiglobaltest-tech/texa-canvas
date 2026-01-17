@@ -1,87 +1,135 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>TEXA-TOOLS | Akses AI Premium Indonesia Tanpa Ribet</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <style>
-      :root {
-        --smooth-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-      
-      * {
-        -webkit-tap-highlight-color: transparent;
-        box-sizing: border-box;
-      }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>TEXA-TOOLS | Akses AI Premium Indonesia Tanpa Ribet</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --smooth-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-      html, body {
-        height: 100%;
-      }
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
 
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #020617;
-        color: #f8fafc;
-        overflow-x: hidden;
-        scroll-behavior: auto;
-        text-rendering: optimizeLegibility;
-        -webkit-font-smoothing: antialiased;
-        overscroll-behavior-y: contain;
-        touch-action: pan-x pan-y;
-      }
+    html,
+    body {
+      height: 100%;
+    }
 
-      .bg-grid {
-        background-size: 40px 40px;
-        background-image: 
-          linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
-      }
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #020617;
+      color: #f8fafc;
+      overflow-x: hidden;
+      scroll-behavior: auto;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior-y: contain;
+      touch-action: pan-x pan-y;
+    }
 
+    .bg-grid {
+      background-size: 40px 40px;
+      background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+
+    .glass {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    @media (pointer: coarse) {
       .glass {
-        background: rgba(15, 23, 42, 0.7);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.92);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+    }
+
+    .premium-gradient {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
+      background-size: 200% 200%;
+    }
+
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translateY(0);
       }
 
-      @media (pointer: coarse) {
-        .glass {
-          background: rgba(15, 23, 42, 0.92);
-          backdrop-filter: none;
-          -webkit-backdrop-filter: none;
-        }
+      50% {
+        transform: translateY(-10px);
       }
+    }
 
-      .premium-gradient {
-        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%);
-        background-size: 200% 200%;
-      }
+    .animate-float {
+      animation: float 6s ease-in-out infinite;
+    }
 
-      @keyframes float {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-10px); }
-      }
-      .animate-float {
-        animation: float 6s ease-in-out infinite;
-      }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
 
-      .mono { font-family: 'JetBrains Mono', monospace; }
-      
-      /* Updated hero-title to be wider and more compact vertically */
-      .hero-title {
-        font-size: clamp(1.8rem, 6vw, 3.8rem);
-        line-height: 1.2;
-        letter-spacing: -0.04em;
-      }
+    /* Updated hero-title to be wider and more compact vertically */
+    .hero-title {
+      font-size: clamp(1.8rem, 6vw, 3.8rem);
+      line-height: 1.2;
+      letter-spacing: -0.04em;
+    }
 
-      .no-scrollbar::-webkit-scrollbar { display: none; }
-      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    </style>
-<script type="importmap">
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Smooth animation for popups and transitions */
+    .smooth-animate {
+      transition: var(--smooth-transition);
+    }
+
+    /* Responsive fixes */
+    @media (max-width: 640px) {
+      .container {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+    }
+
+    /* Hide scrollbar on popup but allow scrolling */
+    .popup-scroll {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Safe area for mobile devices */
+    @supports (padding: max(0px)) {
+      body {
+        padding-left: max(0px, env(safe-area-inset-left));
+        padding-right: max(0px, env(safe-area-inset-right));
+        padding-bottom: max(0px, env(safe-area-inset-bottom));
+      }
+    }
+  </style>
+  <script type="importmap">
 {
   "imports": {
     "react/": "https://esm.sh/react@^19.2.3/",
@@ -94,8 +142,10 @@
 }
 </script>
 </head>
+
 <body class="bg-grid">
-    <div id="root"></div>
-<script type="module" src="/index.tsx"></script>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
 </body>
+
 </html>

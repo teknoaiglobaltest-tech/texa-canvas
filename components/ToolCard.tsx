@@ -11,6 +11,9 @@ import {
   formatIDR,
   DEFAULT_SETTINGS
 } from '../services/subscriptionService';
+import { checkExtensionInstalled } from '../services/extensionService';
+import { usePopupState } from '../services/popupContext';
+import ExtensionWarningPopup from './ExtensionWarningPopup';
 
 interface ToolCardProps {
   tool: AITool;
@@ -73,11 +76,15 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
   const [status, setStatus] = useState<string | null>(null);
   const [showSubscribePopup, setShowSubscribePopup] = useState(false);
   const [showVideoPopup, setShowVideoPopup] = useState(false);
+  const [showExtensionWarning, setShowExtensionWarning] = useState(false);
   const [settings, setSettings] = useState<SubscriptionSettings>(DEFAULT_SETTINGS);
   const [selectedPackage, setSelectedPackage] = useState<SubscriptionPackage | null>(null);
 
   // Get embed URL from video URL
   const embedUrl = parseYouTubeUrl(tool.embedVideoUrl || '');
+
+  // Register popup states to hide/show header/footer
+  usePopupState(showSubscribePopup || showVideoPopup || showExtensionWarning);
 
   // Subscribe to settings
   useEffect(() => {
@@ -128,14 +135,18 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
           requestId,
           toolId: tool.id,
           idToken,
-          targetUrl: tool.targetUrl
+          targetUrl: tool.targetUrl,
+          // Kirim cookiesData langsung dari tool jika ada
+          cookiesData: tool.cookiesData || null,
+          // Kirim apiUrl untuk fetch cookies dinamis
+          apiUrl: tool.apiUrl || null
         },
         window.location.origin
       );
     });
   };
 
-  const handleOpenTool = () => {
+  const handleOpenTool = async () => {
     if (!hasAccess) {
       setShowSubscribePopup(true);
       return;
@@ -148,7 +159,21 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
       return;
     }
 
+    // Check if extension is installed first
     setInjecting(true);
+    setStatus("Memeriksa Extension...");
+
+    const isExtensionInstalled = await checkExtensionInstalled();
+
+    if (!isExtensionInstalled) {
+      // Extension not installed, show warning popup
+      setInjecting(false);
+      setStatus(null);
+      setShowExtensionWarning(true);
+      return;
+    }
+
+    // Extension is installed, proceed with opening tool
     setStatus("Syncing Sesi...");
 
     setTimeout(() => {
@@ -468,6 +493,13 @@ const ToolCard: React.FC<ToolCardProps> = ({ tool, hasAccess, onBuyClick }) => {
           </div>
         </div>
       )}
+
+      {/* Extension Warning Popup */}
+      <ExtensionWarningPopup
+        isOpen={showExtensionWarning}
+        onClose={() => setShowExtensionWarning(false)}
+        toolName={tool.name}
+      />
     </>
   );
 };

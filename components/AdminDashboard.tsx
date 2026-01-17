@@ -31,11 +31,17 @@ import {
   RevenueShareRole,
   formatIDR
 } from '../services/subscriptionService';
+import {
+  ExtensionSettings,
+  DEFAULT_EXTENSION_SETTINGS,
+  subscribeToExtensionSettings,
+  saveExtensionSettings
+} from '../services/extensionService';
 import toketHtml from '../tambahan/toket.txt?raw';
 import toketExtHtml from '../tambahan/toket-ext.txt?raw';
 
 // Tab type
-type AdminTab = 'members' | 'catalog' | 'subscription' | 'revenueShare' | 'toket' | 'tokenVault';
+type AdminTab = 'members' | 'catalog' | 'subscription' | 'revenueShare' | 'extension' | 'toket' | 'tokenVault';
 
 const AdminDashboard: React.FC = () => {
   // Current active tab
@@ -65,6 +71,7 @@ const AdminDashboard: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [dbStatus, setDbStatus] = useState<{ firestore: string; rtdb: string } | null>(null);
+  const [extensionSettings, setExtensionSettings] = useState<ExtensionSettings>(DEFAULT_EXTENSION_SETTINGS);
 
   // Subscribe to users on mount
   useEffect(() => {
@@ -86,6 +93,13 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     const unsubscribe = subscribeToRevenueShareSettings((settings) => {
       setRevenueSharePeople(settings.people || []);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToExtensionSettings((settings) => {
+      setExtensionSettings(settings);
     });
     return () => unsubscribe();
   }, []);
@@ -526,6 +540,15 @@ const AdminDashboard: React.FC = () => {
             💸 Bagi Hasil
           </button>
           <button
+            onClick={() => setActiveTab('extension')}
+            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${activeTab === 'extension'
+              ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-lg shadow-rose-500/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+          >
+            🧩 Pengaturan Extension
+          </button>
+          <button
             onClick={() => setActiveTab('toket')}
             className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${activeTab === 'toket'
               ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
@@ -677,6 +700,197 @@ const AdminDashboard: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'extension' ? (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="glass rounded-2xl p-6 border border-white/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-xl font-black text-white flex items-center gap-2">🧩 Pengaturan Extension</h3>
+              <p className="text-slate-400 text-sm mt-1">
+                Atur link download, video tutorial, dan pesan popup untuk pengguna yang belum memasang extension.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                setActionLoading(true);
+                try {
+                  const success = await saveExtensionSettings(extensionSettings);
+                  if (success) showToast('Pengaturan Extension tersimpan', 'success');
+                  else showToast('Gagal menyimpan pengaturan', 'error');
+                } finally {
+                  setActionLoading(false);
+                }
+              }}
+              disabled={actionLoading}
+              className="px-5 py-2.5 rounded-xl text-sm font-black bg-rose-600 text-white hover:bg-rose-500 transition-colors disabled:opacity-50"
+            >
+              {actionLoading ? 'Menyimpan...' : '💾 Simpan Pengaturan'}
+            </button>
+          </div>
+
+          {/* Settings Form */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Download Settings */}
+            <div className="glass rounded-2xl p-6 border border-white/10">
+              <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                📦 Link Download Extension
+              </h4>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    URL Download *
+                  </label>
+                  <input
+                    type="url"
+                    value={extensionSettings.downloadUrl}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, downloadUrl: e.target.value })}
+                    placeholder="https://drive.google.com/... atau link lainnya"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white placeholder:text-slate-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Link untuk download file extension (ZIP)</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Teks Tombol Download
+                  </label>
+                  <input
+                    type="text"
+                    value={extensionSettings.downloadButtonText || ''}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, downloadButtonText: e.target.value })}
+                    placeholder="📦 Download Extension"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white placeholder:text-slate-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Video Tutorial Settings */}
+            <div className="glass rounded-2xl p-6 border border-white/10">
+              <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                🎬 Video Tutorial
+              </h4>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    URL Video Tutorial *
+                  </label>
+                  <input
+                    type="url"
+                    value={extensionSettings.tutorialVideoUrl}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, tutorialVideoUrl: e.target.value })}
+                    placeholder="https://youtube.com/watch?v=... atau embed URL"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white placeholder:text-slate-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Mendukung format: youtube.com/watch, youtu.be, shorts, embed</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    URL Artikel Tutorial (Opsional)
+                  </label>
+                  <input
+                    type="url"
+                    value={extensionSettings.tutorialArticleUrl || ''}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, tutorialArticleUrl: e.target.value })}
+                    placeholder="https://blog.example.com/..."
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white placeholder:text-slate-500"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="showTutorialVideo"
+                    checked={extensionSettings.showTutorialVideo ?? true}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, showTutorialVideo: e.target.checked })}
+                    className="w-5 h-5 rounded bg-black/30 border border-white/10 text-rose-600 focus:ring-rose-500"
+                  />
+                  <label htmlFor="showTutorialVideo" className="text-sm text-slate-300">
+                    Tampilkan video tutorial di popup
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Popup Content Settings */}
+            <div className="glass rounded-2xl p-6 border border-white/10 lg:col-span-2">
+              <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                💬 Konten Popup
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Icon Popup
+                  </label>
+                  <input
+                    type="text"
+                    value={extensionSettings.popupIcon || ''}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, popupIcon: e.target.value })}
+                    placeholder="🧩"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white text-2xl text-center"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Judul Popup
+                  </label>
+                  <input
+                    type="text"
+                    value={extensionSettings.popupTitle || ''}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, popupTitle: e.target.value })}
+                    placeholder="Extension Belum Terpasang"
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Deskripsi Popup
+                  </label>
+                  <textarea
+                    value={extensionSettings.popupDescription || ''}
+                    onChange={(e) => setExtensionSettings({ ...extensionSettings, popupDescription: e.target.value })}
+                    placeholder="Untuk menggunakan tools ini, Anda perlu memasang TEXA Tools Extension terlebih dahulu..."
+                    rows={3}
+                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-xl focus:outline-none focus:border-rose-500 text-white placeholder:text-slate-500 resize-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Preview Section */}
+          <div className="glass rounded-2xl p-6 border border-white/10">
+            <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              👁️ Preview Popup
+            </h4>
+            <div className="bg-black/50 rounded-2xl p-6 border border-white/5">
+              <div className="max-w-md mx-auto glass rounded-2xl overflow-hidden border border-white/10">
+                {/* Preview Header */}
+                <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center text-2xl">
+                      {extensionSettings.popupIcon || '🧩'}
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">{extensionSettings.popupTitle || 'Extension Belum Terpasang'}</h5>
+                      <p className="text-white/60 text-xs">Preview popup warning</p>
+                    </div>
+                  </div>
+                </div>
+                {/* Preview Content */}
+                <div className="p-4">
+                  <p className="text-slate-400 text-xs mb-3">{extensionSettings.popupDescription || 'Deskripsi popup akan muncul di sini...'}</p>
+                  {extensionSettings.tutorialVideoUrl && extensionSettings.showTutorialVideo && (
+                    <div className="bg-slate-800 rounded-lg h-20 flex items-center justify-center mb-3">
+                      <span className="text-slate-500 text-xs">🎬 Video Tutorial</span>
+                    </div>
+                  )}
+                  <button className="w-full py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold">
+                    {extensionSettings.downloadButtonText || '📦 Download Extension'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
